@@ -1,13 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { 
-  SAMPLE_MARGARET_PROFILE, 
-  SAMPLE_ROSA_PROFILE, 
-  SAMPLE_SUSAN_PROFILE, 
-  SAMPLE_ANNA_PROFILE, 
-  SAMPLE_NOMVULA_PROFILE 
-} from '../lib/sample-data';
+import { SAMPLE_NOMVULA_PROFILE, SAMPLE_DOROTHY_PROFILE } from '../lib/sample-data';
 import { CaregiverProfile, ReactionType } from '../lib/types';
 import { recordVisitReactions } from '../lib/care-logic';
 import { TasteMap } from '../components/TasteMap';
@@ -20,23 +14,20 @@ import {
   Clock, 
   ArrowRight, 
   Lock, 
-  Users,
   Compass,
-  FileCheck
+  RotateCcw,
+  Info
 } from 'lucide-react';
 
 export default function HomePage() {
-  const [profile, setProfile] = useState<CaregiverProfile>(SAMPLE_MARGARET_PROFILE);
+  const [profile, setProfile] = useState<CaregiverProfile>(SAMPLE_NOMVULA_PROFILE);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'map' | 'visit_kit' | 'learning'>('map');
   const [hasLoggedVisit, setHasLoggedVisit] = useState(false);
 
   const sampleProfiles = [
-    { id: 'profile-margaret', name: 'Margaret (England, 1946)', profile: SAMPLE_MARGARET_PROFILE },
-    { id: 'profile-rosa', name: 'Rosa (Italy, 1950)', profile: SAMPLE_ROSA_PROFILE },
-    { id: 'profile-susan', name: 'Susan (USA, 1952)', profile: SAMPLE_SUSAN_PROFILE },
-    { id: 'profile-anna', name: 'Anna (Sweden, 1955)', profile: SAMPLE_ANNA_PROFILE },
-    { id: 'profile-nomvula', name: 'Nomvula (S. Africa, 1948)', profile: SAMPLE_NOMVULA_PROFILE }
+    { id: 'profile-nomvula', name: 'Nomvula (Soweto, 1948) — Lead Showcase', profile: SAMPLE_NOMVULA_PROFILE },
+    { id: 'profile-dorothy', name: 'Dorothy (Ohio, 1946) — Backup Lead', profile: SAMPLE_DOROTHY_PROFILE }
   ];
 
   const handleSelectSample = (prof: CaregiverProfile) => {
@@ -53,7 +44,7 @@ export default function HomePage() {
   };
 
   const handleResetDemo = () => {
-    setProfile(SAMPLE_MARGARET_PROFILE);
+    setProfile(SAMPLE_NOMVULA_PROFILE);
     setHasLoggedVisit(false);
     setActiveTab('map');
   };
@@ -62,7 +53,7 @@ export default function HomePage() {
     <main className="min-h-screen bg-[#FDFCF7] text-stone-900 pb-24">
       {/* Top Banner / Problem Header */}
       <header className="border-b border-stone-200/90 bg-white/80 backdrop-blur-md sticky top-0 z-30 shadow-2xs">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex flex-col md:flex-row items-center justify-between gap-3">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-900 flex items-center justify-center font-serif font-black text-lg border border-amber-300/60">
               B
@@ -77,9 +68,9 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Sample Profile Switcher for Judges */}
-          <div className="flex items-center gap-2 overflow-x-auto max-w-full pb-1 md:pb-0">
-            <span className="text-[11px] font-mono text-stone-500 font-semibold whitespace-nowrap">
+          {/* Sample Profile Switcher for Judges (2 Profiles Only) */}
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-mono text-stone-500 font-semibold hidden md:inline">
               Judge Profiles:
             </span>
             <div className="inline-flex rounded-xl bg-stone-100 p-1 text-xs font-semibold gap-1">
@@ -87,7 +78,7 @@ export default function HomePage() {
                 <button
                   key={p.id}
                   onClick={() => handleSelectSample(p.profile)}
-                  className={`px-2.5 py-1 rounded-lg transition-all whitespace-nowrap text-[11px] ${
+                  className={`px-3 py-1 rounded-lg transition-all text-[11px] ${
                     profile.id === p.id
                       ? 'bg-white shadow-2xs text-stone-950 font-bold border border-stone-200/60'
                       : 'text-stone-600 hover:text-stone-900'
@@ -113,7 +104,7 @@ export default function HomePage() {
         </h1>
 
         <p className="text-stone-600 text-sm sm:text-base max-w-2xl mx-auto leading-relaxed font-sans">
-          Families don’t lack content; streaming sites have almost every old song. What they lack is knowing <strong>what to try next</strong> once the same three favourites stop working. Back Then uses <strong>Qloo’s Cultural AI</strong> to link favourites across music, film, food, and places, then learns from every visit what still reaches that person.
+          Families don’t lack content; streaming platforms have almost every old song. What they lack is knowing <strong>what to try next</strong> once the same three favourites stop working. Back Then uses <strong>Qloo</strong> to map era-appropriate cultural links, builds on-demand visit kits, and learns from every visit what still reaches that person.
         </p>
 
         {/* The Two Doors (5-Second Explanation) */}
@@ -135,11 +126,11 @@ export default function HomePage() {
           </button>
         </div>
 
-        {/* Dignity & Privacy Micro-Copy */}
+        {/* Honest Safeguards */}
         <div className="text-[11px] text-stone-500 flex flex-wrap items-center justify-center gap-4 pt-1 font-medium">
-          <span>• No account needed</span>
-          <span>• No medical diagnosis stored</span>
-          <span>• Deleted when you leave</span>
+          <span>• No account required</span>
+          <span>• Non-identifying taste queries only</span>
+          <span>• Sample history for demonstration</span>
           <span>• Permanent avoid list filter</span>
         </div>
       </section>
@@ -202,6 +193,7 @@ export default function HomePage() {
               lovedOneName={profile.lovedOneName}
               eraStart={profile.eraStart}
               eraEnd={profile.eraEnd}
+              isLiveApi={Boolean(process.env.NEXT_PUBLIC_QLOO_LIVE)}
             />
 
             <div className="p-5 bg-white border border-stone-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">

@@ -4,18 +4,22 @@ export type NodeStatus = 'worked' | 'untested' | 'avoid'; // green, amber, red
 
 export type ConfidenceTier = 'High' | 'Medium' | 'Low';
 
+export type ProvenanceType = 'qloo_live' | 'qloo_saved' | 'placeholder';
+
 export interface TasteEntity {
   id: string;
   name: string;
   domain: Domain;
-  year?: number | string;
+  year?: number;
   sourceSeed?: string; // e.g. "Miriam Makeba"
-  sourceReason?: string; // e.g. "Discovered by Qloo from Miriam Makeba"
+  sourceReason?: string; // e.g. "People with affinity for Miriam Makeba often connect with Dorothy Masuka"
   status: NodeStatus; // 'worked' = green, 'untested' = amber, 'avoid' = red
   confidence: ConfidenceTier;
-  confidenceReason: string; // e.g. "Lit up twice in past visits" or "Close Qloo neighbour"
+  confidenceReason: string; // e.g. "Lit up twice in past visits"
+  provenance: ProvenanceType; // 'qloo_live' | 'qloo_saved' | 'placeholder'
+  qlooEntityType?: string; // e.g. "urn:entity:artist", "urn:entity:movie"
   mediaLink?: {
-    platform: 'spotify' | 'youtube' | 'recipe' | 'photo';
+    platform: 'spotify' | 'youtube';
     url: string;
     label: string;
   };
@@ -29,7 +33,7 @@ export interface KitSlotItem extends TasteEntity {
 export interface SharedMoment {
   title: string;
   description: string; // Sized for 20 minutes bedside visit
-  actionPrompt: string; // "Play Makeba track and ask if she danced to it on Saturday evenings"
+  actionPrompt: string; // e.g. "Play track and ask if she remembers Sunday church singing"
 }
 
 export interface VisitKit {
@@ -48,12 +52,6 @@ export interface VisitKit {
 
 export type ReactionType = 'lit_up' | 'flat' | 'upset';
 
-export interface ItemReaction {
-  entityId: string;
-  reaction: ReactionType;
-  note?: string;
-}
-
 export interface VisitLog {
   id: string;
   visitNumber: number;
@@ -62,15 +60,22 @@ export interface VisitLog {
   caregiverNote?: string;
   agentReflections: {
     itemLevel: string[]; // e.g. "This worked: Miriam Makeba."
-    patternLevel?: string; // "I noticed something: She responds most to vocal music and place-based memories."
-    nextVisitLine: string; // "Next visit: start with the two songs that reached her..."
+    patternLevel?: string; // "I noticed something: She responds most to vocal music..."
+    nextVisitLine: string; // "Next visit: start with..."
   };
+}
+
+export interface EntityDisambiguationOption {
+  id: string;
+  name: string;
+  type: string;
+  description: string;
 }
 
 export interface CaregiverProfile {
   id: string;
-  lovedOneName: string; // e.g. "Nomvula"
-  birthYear: number; // e.g. 1948
+  lovedOneName: string; // e.g. "Nomvula" (Kept strictly on-device, NEVER sent to Qloo)
+  birthYear: number; // e.g. 1948 (Kept on-device, NEVER sent to Qloo)
   homeRegion: string; // e.g. "Soweto, Johannesburg"
   eraStart: number; // e.g. 1955
   eraEnd: number; // e.g. 1978
@@ -81,6 +86,7 @@ export interface CaregiverProfile {
     food?: string;
     place?: string;
   };
+  confirmedEntities?: Record<string, EntityDisambiguationOption>;
   avoidList: string[]; // Excluded items/topics
   currentKit: VisitKit;
   previousKit?: VisitKit;

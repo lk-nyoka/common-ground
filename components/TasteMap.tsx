@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { TasteEntity, Domain } from '../lib/types';
+import { TasteEntity, Domain, ProvenanceType } from '../lib/types';
 import { 
   Sparkles, 
   Music, 
@@ -14,7 +14,7 @@ import {
   ExternalLink,
   Shield,
   Layers,
-  Search
+  Info
 } from 'lucide-react';
 
 interface TasteMapProps {
@@ -22,9 +22,10 @@ interface TasteMapProps {
   lovedOneName: string;
   eraStart: number;
   eraEnd: number;
+  isLiveApi?: boolean;
 }
 
-export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd }: TasteMapProps) {
+export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd, isLiveApi = false }: TasteMapProps) {
   const [selectedNode, setSelectedNode] = useState<TasteEntity | null>(nodes[0] || null);
   const [domainFilter, setDomainFilter] = useState<'all' | Domain>('all');
 
@@ -56,6 +57,29 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd }: TasteMapProp
     }
   };
 
+  const getProvenanceBadge = (prov: ProvenanceType) => {
+    switch (prov) {
+      case 'qloo_live':
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+            Qloo (live)
+          </span>
+        );
+      case 'qloo_saved':
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-100 text-amber-900 border border-amber-300">
+            Qloo (saved result)
+          </span>
+        );
+      default:
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-stone-100 text-stone-600 border border-stone-200">
+            Placeholder — not Qloo data
+          </span>
+        );
+    }
+  };
+
   const getDomainIcon = (domain: TasteEntity['domain']) => {
     switch (domain) {
       case 'music':
@@ -73,6 +97,16 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd }: TasteMapProp
 
   return (
     <div className="bg-stone-50 border border-stone-200 rounded-3xl p-6 sm:p-8 shadow-sm">
+      {/* Honest Connection Status Banner */}
+      {!isLiveApi && (
+        <div className="mb-5 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2.5 text-xs text-amber-900">
+          <Info className="w-4 h-4 text-amber-700 shrink-0" />
+          <span>
+            <strong>Qloo key not connected:</strong> Showing saved sample results for demonstration. When a key is added, live queries run against <code className="font-mono bg-amber-100 px-1 py-0.5 rounded">https://hackathon.api.qloo.com</code>.
+          </span>
+        </div>
+      )}
+
       {/* Header with Era Guardrail */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-6 border-b border-stone-200 gap-4">
         <div>
@@ -80,12 +114,12 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd }: TasteMapProp
             <h3 className="font-serif text-2xl sm:text-3xl font-black text-stone-900 tracking-tight">
               {lovedOneName}’s Living Taste Map
             </h3>
-            <span className="px-2.5 py-1 rounded-md text-[11px] font-mono uppercase tracking-wider bg-amber-500/15 text-amber-900 font-bold border border-amber-300/60">
-              Qloo Cultural Graph
+            <span className="px-2.5 py-1 rounded-md text-[11px] font-mono uppercase tracking-wider bg-stone-200 text-stone-800 font-bold border border-stone-300">
+              Cultural Affinity Graph
             </span>
           </div>
           <p className="text-xs sm:text-sm text-stone-600 mt-1 max-w-2xl leading-relaxed">
-            The core landing image. Proven favourites sit in the centre with Qloo’s discoveries fanning out around them. Nodes change colour as you log visits.
+            Confirmed favourites sit in the centre with Qloo’s discoveries fanning out around them. Nodes reflect group cultural affinities within her youth era, not individual medical predictions.
           </p>
         </div>
 
@@ -93,7 +127,7 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd }: TasteMapProp
         <div className="inline-flex items-center gap-2 px-4 py-2 bg-amber-100/70 border border-amber-300/80 rounded-xl text-xs font-medium text-amber-950 shadow-2xs">
           <span className="w-2.5 h-2.5 rounded-full bg-amber-600 animate-ping"></span>
           <span>
-            Era Guardrail: <strong>{eraStart} – {eraEnd}</strong> (Ages {Math.max(12, eraStart - (eraStart - 12))} to {Math.max(12, eraStart - (eraStart - 12)) + (eraEnd - eraStart)})
+            Era Guardrail: <strong>{eraStart} – {eraEnd}</strong>
           </span>
         </div>
       </div>
@@ -148,7 +182,7 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd }: TasteMapProp
           </div>
 
           <div className="text-xs text-stone-500 mb-4 italic">
-            Click any node to inspect its Qloo connection trail and confidence tier:
+            Click any node below to inspect its source provenance and group affinity match:
           </div>
 
           {/* Node Grid */}
@@ -174,9 +208,9 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd }: TasteMapProp
                     <span className="inline-flex p-1.5 rounded-lg bg-white text-stone-700 shadow-2xs border border-stone-200/60">
                       {getDomainIcon(node.domain)}
                     </span>
-                    <span className="text-[11px] font-mono text-stone-500 bg-white/80 px-1.5 py-0.5 rounded border border-stone-200/50">
-                      {node.year || 'Era match'}
-                    </span>
+                    <div className="flex items-center gap-1">
+                      {getProvenanceBadge(node.provenance)}
+                    </div>
                   </div>
 
                   <div className="mt-2.5">
@@ -225,24 +259,39 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd }: TasteMapProp
                 <h4 className="text-xl font-serif font-black text-stone-900 leading-tight">
                   {selectedNode.name}
                 </h4>
-                <div className="flex items-center gap-2 mt-1.5 text-xs text-stone-500">
+                <div className="flex items-center gap-2 mt-1.5 text-xs text-stone-600">
                   <span className="capitalize font-semibold text-stone-700">{selectedNode.domain}</span>
-                  <span>•</span>
-                  <span>Release Year: <strong>{selectedNode.year || `${eraStart}–${eraEnd}`}</strong></span>
+                  {selectedNode.year && (
+                    <>
+                      <span>•</span>
+                      <span>Release: <strong>{selectedNode.year}</strong></span>
+                    </>
+                  )}
+                  {selectedNode.qlooEntityType && (
+                    <>
+                      <span>•</span>
+                      <code className="text-[10px] bg-stone-200 px-1 py-0.5 rounded font-mono text-stone-700">
+                        {selectedNode.qlooEntityType}
+                      </code>
+                    </>
+                  )}
                 </div>
               </div>
 
               {/* Provenance Card */}
               <div className="p-3.5 bg-white rounded-xl border border-stone-200/80 shadow-2xs space-y-1">
-                <span className="font-mono text-[10px] uppercase font-bold text-amber-900 tracking-wider block">
-                  Qloo Discovery Provenance
-                </span>
-                <p className="text-xs text-stone-800 leading-relaxed font-medium">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-[10px] uppercase font-bold text-amber-900 tracking-wider">
+                    Data Source & Affinity
+                  </span>
+                  {getProvenanceBadge(selectedNode.provenance)}
+                </div>
+                <p className="text-xs text-stone-800 leading-relaxed font-medium mt-1">
                   {selectedNode.sourceReason || 'Original seed provided by family.'}
                 </p>
               </div>
 
-              {/* Confidence & Safety Grid */}
+              {/* Confidence & Guardrail Grid */}
               <div className="grid grid-cols-2 gap-2.5">
                 <div className="p-3 bg-white rounded-xl border border-stone-200 shadow-2xs">
                   <span className="font-mono text-[10px] uppercase font-semibold text-stone-500 block">
@@ -261,15 +310,15 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd }: TasteMapProp
                     Era Guardrail
                   </span>
                   <span className="font-black text-emerald-800 text-sm block mt-0.5">
-                    Verified Match
+                    {eraStart}–{eraEnd}
                   </span>
                   <p className="text-[10px] text-stone-600 mt-0.5 leading-tight">
-                    Kept inside {eraStart}–{eraEnd}
+                    Kept within youth bounds
                   </p>
                 </div>
               </div>
 
-              {/* Streaming & Media Action */}
+              {/* Media Action */}
               {selectedNode.mediaLink && (
                 <a
                   href={selectedNode.mediaLink.url}
@@ -284,7 +333,7 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd }: TasteMapProp
             </div>
           ) : (
             <div className="text-center py-16 text-stone-500 text-xs">
-              Select a node to inspect its Qloo connection path.
+              Select a node to inspect its cultural affinity trail.
             </div>
           )}
         </div>
