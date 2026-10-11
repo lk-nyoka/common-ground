@@ -265,6 +265,7 @@ export const SAMPLE_DOROTHY_PROFILE: CaregiverProfile = {
         status: 'worked',
         confidence: 'High',
         confidenceReason: 'Family baseline favourite',
+        slotType: 'proven',
         mediaLink: {
           platform: 'spotify',
           url: 'https://open.spotify.com/search/patsy%20cline%20crazy',
@@ -281,6 +282,7 @@ export const SAMPLE_DOROTHY_PROFILE: CaregiverProfile = {
         status: 'worked',
         confidence: 'High',
         confidenceReason: 'Family baseline favourite',
+        slotType: 'proven',
         mediaLink: {
           platform: 'youtube',
           url: 'https://www.youtube.com/results?search_query=edelweiss+sound+of+music',
@@ -298,7 +300,8 @@ export const SAMPLE_DOROTHY_PROFILE: CaregiverProfile = {
         sourceReason: 'Discovered by Qloo from Patsy Cline (Owen Bradley Nashville Sound cluster)',
         status: 'untested',
         confidence: 'Medium',
-        confidenceReason: 'Close Qloo affinity match'
+        confidenceReason: 'Close Qloo affinity match',
+        slotType: 'discovery'
       }
     ],
     hypothesis: {
