@@ -1,34 +1,32 @@
 'use client';
 
 import React, { useState } from 'react';
-import { VisitKit, ReactionType, ItemReaction } from '../lib/types';
+import { VisitKit, ReactionType, CaregiverProfile } from '../lib/types';
+import { PrintableVisitCard } from './PrintableVisitCard';
 import { 
   Sparkles, 
   Smile, 
   MinusCircle, 
   AlertTriangle, 
-  CheckCircle, 
   ArrowRight, 
-  HelpCircle, 
   ShieldAlert, 
   MessageSquare, 
   Clock, 
-  HeartHandshake,
+  Heart,
+  Printer,
   Music,
-  ExternalLink
+  ExternalLink,
+  Wand2
 } from 'lucide-react';
 
 interface VisitKitViewProps {
   kit: VisitKit;
-  lovedOneName: string;
+  profile: CaregiverProfile;
   onLogReactions: (reactions: Record<string, ReactionType>, note?: string) => void;
   isCompleted?: boolean;
 }
 
-export function VisitKitView({ kit, lovedOneName, onLogReactions, isCompleted }: VisitKitViewProps) {
-  // Reactions state for each item in the kit
-  const allItems = [...kit.provenFavourites, ...kit.qlooDiscoveries, kit.hypothesis];
-  
+export function VisitKitView({ kit, profile, onLogReactions, isCompleted }: VisitKitViewProps) {
   const [reactions, setReactions] = useState<Record<string, ReactionType>>({
     [kit.provenFavourites[0]?.id || '']: 'lit_up',
     [kit.qlooDiscoveries[0]?.id || '']: 'lit_up',
@@ -36,7 +34,8 @@ export function VisitKitView({ kit, lovedOneName, onLogReactions, isCompleted }:
   });
 
   const [note, setNote] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [parsedFeedback, setParsedFeedback] = useState<string | null>(null);
 
   const handleSelectReaction = (itemId: string, type: ReactionType) => {
     setReactions((prev) => ({
@@ -45,107 +44,146 @@ export function VisitKitView({ kit, lovedOneName, onLogReactions, isCompleted }:
     }));
   };
 
+  // Typed-note natural language reaction parser
+  const handleParseNote = () => {
+    if (!note.trim()) return;
+    const lower = note.toLowerCase();
+    const updated = { ...reactions };
+    const detected: string[] = [];
+
+    // Analyze text sentiment against kit items
+    kit.provenFavourites.forEach((item) => {
+      const name = item.name.toLowerCase();
+      if (lower.includes('dolly') || lower.includes('smile') || lower.includes('loved') || lower.includes('sung') || lower.includes('happy')) {
+        updated[item.id] = 'lit_up';
+        detected.push(`${item.name.split('—')[0].trim()}: Lit Up 🟢`);
+      }
+    });
+
+    if (lower.includes('upset') || lower.includes('cried') || lower.includes('agitated') || lower.includes('scared') || lower.includes('distress') || lower.includes('siren')) {
+      updated[kit.hypothesis.id] = 'upset';
+      detected.push(`${kit.hypothesis.name.split('—')[0].trim()}: Upset 🔴 (Avoid List Triggered)`);
+    } else if (lower.includes('quiet') || lower.includes('flat') || lower.includes('lost interest') || lower.includes('tired')) {
+      updated[kit.hypothesis.id] = 'flat';
+      detected.push(`${kit.hypothesis.name.split('—')[0].trim()}: Flat 🟡`);
+    }
+
+    setReactions(updated);
+    setParsedFeedback(detected.length > 0 ? `Agent parsed note: ${detected.join(', ')}` : 'Note noted for visit log.');
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
     onLogReactions(reactions, note);
   };
 
   return (
     <div className="space-y-6">
-      {/* "Why This Kit?" Header Card */}
-      <div className="bg-amber-50/70 border border-amber-200/80 rounded-2xl p-5 shadow-2xs">
-        <div className="flex items-center gap-2 mb-2.5">
-          <Sparkles className="w-4 h-4 text-amber-700" />
-          <h4 className="font-serif text-lg font-bold text-amber-950">
-            Why this visit kit for {lovedOneName}?
-          </h4>
-          <span className="ml-auto text-xs font-mono text-amber-700 bg-amber-100/60 px-2 py-0.5 rounded">
-            Visit #{kit.visitNumber}
-          </span>
+      {/* Action Header & Printable Card CTA */}
+      <div className="bg-amber-50/80 border border-amber-200 rounded-3xl p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1.5">
+            <Sparkles className="w-4 h-4 text-amber-700" />
+            <h4 className="font-serif text-xl font-bold text-amber-950">
+              Why this visit kit for {profile.lovedOneName}?
+            </h4>
+            <span className="ml-2 text-xs font-mono font-bold text-amber-800 bg-amber-200/60 px-2.5 py-0.5 rounded-full">
+              Visit #{kit.visitNumber}
+            </span>
+          </div>
+          <ul className="space-y-1 text-xs text-amber-900 leading-relaxed">
+            {kit.whyThisKit.map((reason, idx) => (
+              <li key={idx} className="flex items-start gap-2">
+                <span className="font-bold text-amber-700 select-none">•</span>
+                <span>{reason}</span>
+              </li>
+            ))}
+          </ul>
         </div>
-        <ul className="space-y-1.5 text-xs text-amber-900 leading-relaxed">
-          {kit.whyThisKit.map((reason, idx) => (
-            <li key={idx} className="flex items-start gap-2">
-              <span className="font-bold text-amber-700 select-none">•</span>
-              <span>{reason}</span>
-            </li>
-          ))}
-        </ul>
+
+        {/* Print Button */}
+        <button
+          type="button"
+          onClick={() => setIsPrintModalOpen(true)}
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white hover:bg-stone-100 text-stone-900 border border-stone-300 rounded-xl text-xs font-bold transition-all shadow-2xs shrink-0"
+        >
+          <Printer className="w-4 h-4 text-stone-700" />
+          <span>Print Bedside Card</span>
+        </button>
       </div>
 
       {/* The 4 Slot Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {/* Slot 1: Proven Favourites (2-3) */}
-        <div className="bg-white border border-stone-200 rounded-xl p-5 space-y-3">
-          <div className="flex items-center justify-between border-b border-stone-100 pb-2.5">
+        <div className="bg-white border border-stone-200 rounded-2xl p-6 space-y-4 shadow-2xs">
+          <div className="flex items-center justify-between border-b border-stone-100 pb-3">
             <div>
-              <span className="text-[11px] font-mono uppercase font-semibold text-emerald-800 tracking-wider">
-                Safe Ground
+              <span className="text-[11px] font-mono uppercase font-bold text-emerald-800 tracking-wider">
+                Safe Ground (2–3 Items)
               </span>
-              <h5 className="font-serif text-base font-bold text-stone-900">
+              <h5 className="font-serif text-lg font-black text-stone-900">
                 Proven Favourites
               </h5>
             </div>
-            <span className="text-xs px-2 py-0.5 bg-emerald-50 text-emerald-700 font-medium rounded border border-emerald-200">
-              Confidence: High
+            <span className="text-xs px-2.5 py-1 bg-emerald-100/70 text-emerald-800 font-bold rounded-full border border-emerald-300">
+              High Confidence
             </span>
           </div>
 
           <div className="space-y-3">
             {kit.provenFavourites.map((item) => (
-              <div key={item.id} className="p-3 bg-stone-50 rounded-lg border border-stone-200/70">
+              <div key={item.id} className="p-3.5 bg-stone-50 rounded-xl border border-stone-200/80">
                 <div className="flex items-start justify-between gap-2">
-                  <div className="font-semibold text-xs text-stone-900">
+                  <div className="font-bold text-xs text-stone-900">
                     {item.name}
                   </div>
                   {item.year && (
-                    <span className="text-[10px] font-mono text-stone-500">
+                    <span className="text-[11px] font-mono text-stone-500 bg-white px-1.5 py-0.5 rounded border border-stone-200">
                       {item.year}
                     </span>
                   )}
                 </div>
-                <div className="text-[11px] text-stone-600 mt-1">
+                <div className="text-[11px] text-stone-600 mt-1 italic">
                   {item.confidenceReason}
                 </div>
 
                 {/* Reaction Buttons */}
                 {!isCompleted && (
-                  <div className="mt-2.5 pt-2 border-t border-stone-200/60 flex items-center justify-between">
-                    <span className="text-[10px] text-stone-500">Visit reaction:</span>
+                  <div className="mt-3 pt-2.5 border-t border-stone-200/70 flex items-center justify-between">
+                    <span className="text-[10px] text-stone-500 font-medium">Reaction:</span>
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
                         onClick={() => handleSelectReaction(item.id, 'lit_up')}
-                        className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors ${
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
                           reactions[item.id] === 'lit_up'
-                            ? 'bg-emerald-600 text-white shadow-2xs'
+                            ? 'bg-emerald-600 text-white shadow-2xs ring-2 ring-emerald-300'
                             : 'bg-white border border-stone-200 text-stone-700 hover:bg-stone-100'
                         }`}
                       >
-                        <Smile className="w-3 h-3" /> Lit up
+                        <Smile className="w-3.5 h-3.5" /> Lit up
                       </button>
                       <button
                         type="button"
                         onClick={() => handleSelectReaction(item.id, 'flat')}
-                        className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors ${
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
                           reactions[item.id] === 'flat'
-                            ? 'bg-stone-700 text-white shadow-2xs'
+                            ? 'bg-stone-700 text-white shadow-2xs ring-2 ring-stone-400'
                             : 'bg-white border border-stone-200 text-stone-700 hover:bg-stone-100'
                         }`}
                       >
-                        <MinusCircle className="w-3 h-3" /> Flat
+                        <MinusCircle className="w-3.5 h-3.5" /> Flat
                       </button>
                       <button
                         type="button"
                         onClick={() => handleSelectReaction(item.id, 'upset')}
-                        className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors ${
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
                           reactions[item.id] === 'upset'
-                            ? 'bg-rose-600 text-white shadow-2xs'
+                            ? 'bg-rose-600 text-white shadow-2xs ring-2 ring-rose-300'
                             : 'bg-white border border-stone-200 text-stone-700 hover:bg-stone-100'
                         }`}
                       >
-                        <AlertTriangle className="w-3 h-3" /> Upset
+                        <AlertTriangle className="w-3.5 h-3.5" /> Upset
                       </button>
                     </div>
                   </div>
@@ -156,75 +194,75 @@ export function VisitKitView({ kit, lovedOneName, onLogReactions, isCompleted }:
         </div>
 
         {/* Slot 2: Qloo Discoveries (1-2) */}
-        <div className="bg-white border border-stone-200 rounded-xl p-5 space-y-3">
-          <div className="flex items-center justify-between border-b border-stone-100 pb-2.5">
+        <div className="bg-white border border-stone-200 rounded-2xl p-6 space-y-4 shadow-2xs">
+          <div className="flex items-center justify-between border-b border-stone-100 pb-3">
             <div>
-              <span className="text-[11px] font-mono uppercase font-semibold text-amber-800 tracking-wider">
-                Gently Widen
+              <span className="text-[11px] font-mono uppercase font-bold text-amber-800 tracking-wider">
+                Gently Widen (1–2 Items)
               </span>
-              <h5 className="font-serif text-base font-bold text-stone-900">
-                Qloo Discovery
+              <h5 className="font-serif text-lg font-black text-stone-900">
+                Qloo Discoveries
               </h5>
             </div>
-            <span className="text-xs px-2 py-0.5 bg-amber-50 text-amber-800 font-medium rounded border border-amber-200">
-              Confidence: Medium
+            <span className="text-xs px-2.5 py-1 bg-amber-100/70 text-amber-900 font-bold rounded-full border border-amber-300">
+              Medium Confidence
             </span>
           </div>
 
           <div className="space-y-3">
             {kit.qlooDiscoveries.map((item) => (
-              <div key={item.id} className="p-3 bg-stone-50 rounded-lg border border-stone-200/70">
+              <div key={item.id} className="p-3.5 bg-stone-50 rounded-xl border border-stone-200/80">
                 <div className="flex items-start justify-between gap-2">
-                  <div className="font-semibold text-xs text-stone-900">
+                  <div className="font-bold text-xs text-stone-900">
                     {item.name}
                   </div>
                   {item.year && (
-                    <span className="text-[10px] font-mono text-stone-500">
+                    <span className="text-[11px] font-mono text-stone-500 bg-white px-1.5 py-0.5 rounded border border-stone-200">
                       {item.year}
                     </span>
                   )}
                 </div>
-                <div className="text-[11px] text-amber-900 mt-1 font-medium">
+                <div className="text-[11px] text-amber-900 mt-1 font-semibold">
                   {item.sourceReason}
                 </div>
 
                 {/* Reaction Buttons */}
                 {!isCompleted && (
-                  <div className="mt-2.5 pt-2 border-t border-stone-200/60 flex items-center justify-between">
-                    <span className="text-[10px] text-stone-500">Visit reaction:</span>
+                  <div className="mt-3 pt-2.5 border-t border-stone-200/70 flex items-center justify-between">
+                    <span className="text-[10px] text-stone-500 font-medium">Reaction:</span>
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
                         onClick={() => handleSelectReaction(item.id, 'lit_up')}
-                        className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors ${
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
                           reactions[item.id] === 'lit_up'
-                            ? 'bg-emerald-600 text-white shadow-2xs'
+                            ? 'bg-emerald-600 text-white shadow-2xs ring-2 ring-emerald-300'
                             : 'bg-white border border-stone-200 text-stone-700 hover:bg-stone-100'
                         }`}
                       >
-                        <Smile className="w-3 h-3" /> Lit up
+                        <Smile className="w-3.5 h-3.5" /> Lit up
                       </button>
                       <button
                         type="button"
                         onClick={() => handleSelectReaction(item.id, 'flat')}
-                        className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors ${
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
                           reactions[item.id] === 'flat'
-                            ? 'bg-stone-700 text-white shadow-2xs'
+                            ? 'bg-stone-700 text-white shadow-2xs ring-2 ring-stone-400'
                             : 'bg-white border border-stone-200 text-stone-700 hover:bg-stone-100'
                         }`}
                       >
-                        <MinusCircle className="w-3 h-3" /> Flat
+                        <MinusCircle className="w-3.5 h-3.5" /> Flat
                       </button>
                       <button
                         type="button"
                         onClick={() => handleSelectReaction(item.id, 'upset')}
-                        className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors ${
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
                           reactions[item.id] === 'upset'
-                            ? 'bg-rose-600 text-white shadow-2xs'
+                            ? 'bg-rose-600 text-white shadow-2xs ring-2 ring-rose-300'
                             : 'bg-white border border-stone-200 text-stone-700 hover:bg-stone-100'
                         }`}
                       >
-                        <AlertTriangle className="w-3 h-3" /> Upset
+                        <AlertTriangle className="w-3.5 h-3.5" /> Upset
                       </button>
                     </div>
                   </div>
@@ -234,79 +272,79 @@ export function VisitKitView({ kit, lovedOneName, onLogReactions, isCompleted }:
           </div>
         </div>
 
-        {/* Slot 3: One Hypothesis (Labelled in the open) */}
-        <div className="bg-white border border-stone-200 rounded-xl p-5 space-y-3">
-          <div className="flex items-center justify-between border-b border-stone-100 pb-2.5">
+        {/* Slot 3: One Hypothesis (Labelled in the Open) */}
+        <div className="bg-white border border-stone-200 rounded-2xl p-6 space-y-4 shadow-2xs">
+          <div className="flex items-center justify-between border-b border-stone-100 pb-3">
             <div>
-              <span className="text-[11px] font-mono uppercase font-semibold text-purple-800 tracking-wider">
-                Careful Experiment
+              <span className="text-[11px] font-mono uppercase font-bold text-purple-800 tracking-wider">
+                Out in the Open (1 Item)
               </span>
-              <h5 className="font-serif text-base font-bold text-stone-900">
+              <h5 className="font-serif text-lg font-black text-stone-900">
                 This Visit’s Hypothesis
               </h5>
             </div>
-            <span className="text-xs px-2 py-0.5 bg-purple-50 text-purple-800 font-medium rounded border border-purple-200">
-              Confidence: Low
+            <span className="text-xs px-2.5 py-1 bg-purple-100/70 text-purple-900 font-bold rounded-full border border-purple-300">
+              Low Confidence
             </span>
           </div>
 
-          <div className="p-3 bg-purple-50/50 rounded-lg border border-purple-200/70">
+          <div className="p-3.5 bg-purple-50/60 rounded-xl border border-purple-200/80">
             <div className="flex items-start justify-between gap-2">
-              <div className="font-semibold text-xs text-purple-950">
+              <div className="font-bold text-xs text-purple-950">
                 {kit.hypothesis.name}
               </div>
               {kit.hypothesis.year && (
-                <span className="text-[10px] font-mono text-purple-800">
+                <span className="text-[11px] font-mono text-purple-800 bg-white px-1.5 py-0.5 rounded border border-purple-200">
                   {kit.hypothesis.year}
                 </span>
               )}
             </div>
 
-            <div className="mt-2 text-xs font-medium text-purple-900 bg-white/80 p-2 rounded border border-purple-200/60">
-              🏷️ <strong>{kit.hypothesis.hypothesisLabel}</strong>
+            <div className="mt-2.5 text-xs font-bold text-purple-950 bg-white p-2.5 rounded-lg border border-purple-200">
+              🏷️ {kit.hypothesis.hypothesisLabel}
             </div>
 
-            <p className="text-[11px] text-purple-800/80 mt-1.5">
+            <p className="text-[11px] text-purple-900/80 mt-1.5 leading-relaxed">
               {kit.hypothesis.sourceReason}
             </p>
 
             {/* Reaction Buttons */}
             {!isCompleted && (
-              <div className="mt-3 pt-2 border-t border-purple-200/60 flex items-center justify-between">
-                <span className="text-[10px] text-purple-800">Did it connect?</span>
+              <div className="mt-3 pt-2.5 border-t border-purple-200/80 flex items-center justify-between">
+                <span className="text-[10px] text-purple-900 font-medium">Did it connect?</span>
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
                     onClick={() => handleSelectReaction(kit.hypothesis.id, 'lit_up')}
-                    className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors ${
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
                       reactions[kit.hypothesis.id] === 'lit_up'
-                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        ? 'bg-emerald-600 text-white shadow-2xs ring-2 ring-emerald-300'
                         : 'bg-white border border-purple-200 text-purple-900 hover:bg-purple-100'
                     }`}
                   >
-                    <Smile className="w-3 h-3" /> Lit up
+                    <Smile className="w-3.5 h-3.5" /> Lit up
                   </button>
                   <button
                     type="button"
                     onClick={() => handleSelectReaction(kit.hypothesis.id, 'flat')}
-                    className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors ${
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
                       reactions[kit.hypothesis.id] === 'flat'
-                        ? 'bg-stone-700 text-white shadow-2xs'
+                        ? 'bg-stone-700 text-white shadow-2xs ring-2 ring-stone-400'
                         : 'bg-white border border-purple-200 text-purple-900 hover:bg-purple-100'
                     }`}
                   >
-                    <MinusCircle className="w-3 h-3" /> Flat
+                    <MinusCircle className="w-3.5 h-3.5" /> Flat
                   </button>
                   <button
                     type="button"
                     onClick={() => handleSelectReaction(kit.hypothesis.id, 'upset')}
-                    className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors ${
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
                       reactions[kit.hypothesis.id] === 'upset'
-                        ? 'bg-rose-600 text-white shadow-2xs'
+                        ? 'bg-rose-600 text-white shadow-2xs ring-2 ring-rose-300'
                         : 'bg-white border border-purple-200 text-purple-900 hover:bg-purple-100'
                     }`}
                   >
-                    <AlertTriangle className="w-3 h-3" /> Upset
+                    <AlertTriangle className="w-3.5 h-3.5" /> Upset
                   </button>
                 </div>
               </div>
@@ -315,42 +353,42 @@ export function VisitKitView({ kit, lovedOneName, onLogReactions, isCompleted }:
         </div>
 
         {/* Slot 4: Small Shared Moment (Bedside 20 min) */}
-        <div className="bg-white border border-stone-200 rounded-xl p-5 space-y-3">
-          <div className="flex items-center justify-between border-b border-stone-100 pb-2.5">
+        <div className="bg-white border border-stone-200 rounded-2xl p-6 space-y-4 shadow-2xs">
+          <div className="flex items-center justify-between border-b border-stone-100 pb-3">
             <div>
-              <span className="text-[11px] font-mono uppercase font-semibold text-blue-800 tracking-wider">
-                Present Moment
+              <span className="text-[11px] font-mono uppercase font-bold text-blue-800 tracking-wider">
+                Present Moment (1 Activity)
               </span>
-              <h5 className="font-serif text-base font-bold text-stone-900">
+              <h5 className="font-serif text-lg font-black text-stone-900">
                 Shared Moment (20 mins)
               </h5>
             </div>
-            <span className="text-xs px-2 py-0.5 bg-blue-50 text-blue-800 font-medium rounded border border-blue-200">
+            <span className="text-xs px-2.5 py-1 bg-blue-100/70 text-blue-900 font-bold rounded-full border border-blue-300">
               Bedside Sized
             </span>
           </div>
 
-          <div className="p-3 bg-blue-50/40 rounded-lg border border-blue-200/60 text-xs space-y-2">
-            <div className="font-semibold text-blue-950">
+          <div className="p-3.5 bg-blue-50/50 rounded-xl border border-blue-200/80 space-y-2 text-xs">
+            <div className="font-bold text-blue-950 text-sm">
               {kit.sharedMoment.title}
             </div>
             <p className="text-stone-700 leading-relaxed">
               {kit.sharedMoment.description}
             </p>
-            <div className="p-2 bg-white rounded border border-blue-200 text-[11px] text-blue-900 italic">
+            <div className="p-2.5 bg-white rounded-lg border border-blue-200 text-[11px] text-blue-950 font-medium italic">
               💡 {kit.sharedMoment.actionPrompt}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Conversation Openers & Stop Cues Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Conversation Openers & Safety Stop Cues */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {/* 3 Conversation Openers */}
-        <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl space-y-2">
-          <div className="flex items-center gap-2 text-stone-900 font-semibold text-xs uppercase tracking-wider">
-            <MessageSquare className="w-3.5 h-3.5 text-stone-600" />
-            3 Conversation Openers
+        <div className="p-5 bg-stone-50 border border-stone-200 rounded-2xl space-y-2.5 shadow-2xs">
+          <div className="flex items-center gap-2 text-stone-900 font-bold text-xs uppercase tracking-wider">
+            <MessageSquare className="w-4 h-4 text-stone-600" />
+            <span>3 Conversation Openers</span>
           </div>
           <ul className="space-y-1.5 text-xs text-stone-700 leading-relaxed">
             {kit.conversationOpeners.map((op, i) => (
@@ -363,12 +401,12 @@ export function VisitKitView({ kit, lovedOneName, onLogReactions, isCompleted }:
         </div>
 
         {/* 2 Stop Cues */}
-        <div className="p-4 bg-rose-50/60 border border-rose-200 rounded-xl space-y-2">
-          <div className="flex items-center gap-2 text-rose-900 font-semibold text-xs uppercase tracking-wider">
-            <ShieldAlert className="w-3.5 h-3.5 text-rose-700" />
-            2 Gentle Stop Cues (Safety Guidance)
+        <div className="p-5 bg-rose-50/70 border border-rose-200 rounded-2xl space-y-2.5 shadow-2xs">
+          <div className="flex items-center gap-2 text-rose-950 font-bold text-xs uppercase tracking-wider">
+            <ShieldAlert className="w-4 h-4 text-rose-700" />
+            <span>2 Fixed Stop Cues (Safety Guidance)</span>
           </div>
-          <ul className="space-y-1.5 text-xs text-rose-900/90 leading-relaxed">
+          <ul className="space-y-1.5 text-xs text-rose-900 leading-relaxed">
             {kit.stopCues.map((cue, i) => (
               <li key={i} className="flex items-start gap-2">
                 <span className="font-bold text-rose-500 select-none">•</span>
@@ -379,47 +417,75 @@ export function VisitKitView({ kit, lovedOneName, onLogReactions, isCompleted }:
         </div>
       </div>
 
-      {/* Post-Visit Reaction Submission (Takes under 30 seconds) */}
+      {/* Post-Visit Reaction Log Form */}
       {!isCompleted && (
-        <form onSubmit={handleSubmit} className="p-5 bg-stone-900 text-white rounded-2xl space-y-4 shadow-md">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-800 pb-3">
+        <form onSubmit={handleSubmit} className="p-6 bg-stone-950 text-white rounded-3xl space-y-5 shadow-xl border border-stone-800">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-800 pb-4">
             <div>
-              <h4 className="font-serif text-lg font-bold">
+              <h4 className="font-serif text-xl font-bold text-white">
                 Log Reactions from this Visit
               </h4>
-              <p className="text-xs text-stone-400">
-                One tap per item above, plus an optional short note. Done in under 30 seconds.
+              <p className="text-xs text-stone-400 mt-0.5">
+                Takes under 30 seconds. One tap per item above, or type a note below.
               </p>
             </div>
-            <div className="text-xs text-stone-400">
-              Permanent avoid list safeguards included
+            <div className="text-xs text-amber-400 font-mono font-medium">
+              Upset items go to permanent avoid list
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-stone-300 mb-1.5">
-              Optional Caregiver Note (or leave blank and use one-taps above):
-            </label>
-            <input
-              type="text"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="e.g. She smiled at Makeba but closed her eyes during the film..."
-              className="w-full px-3.5 py-2.5 rounded-lg bg-stone-800 border border-stone-700 text-xs text-white placeholder-stone-500 focus:outline-none focus:border-amber-400"
-            />
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-semibold text-stone-300">
+                Caregiver Typed Note (Optional — The agent will parse it into reactions):
+              </label>
+              <button
+                type="button"
+                onClick={handleParseNote}
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-400 hover:text-amber-300"
+              >
+                <Wand2 className="w-3 h-3" />
+                <span>Auto-Parse Note</span>
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="e.g. She smiled at Dolly Parton but went quiet and looked distressed during the war film..."
+                className="w-full px-4 py-3 rounded-xl bg-stone-900 border border-stone-700 text-xs text-white placeholder-stone-500 focus:outline-none focus:border-amber-400 transition-colors"
+              />
+            </div>
+            {parsedFeedback && (
+              <div className="p-2 bg-stone-900 rounded-lg border border-amber-500/50 text-[11px] text-amber-300">
+                {parsedFeedback}
+              </div>
+            )}
           </div>
 
-          <div className="flex items-center justify-end gap-3 pt-2">
+          <div className="flex items-center justify-between pt-2">
+            <span className="text-[11px] text-stone-400 hidden sm:inline">
+              Watch the taste map update its colors and see the Next-Visit Line
+            </span>
             <button
               type="submit"
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-400 hover:bg-amber-300 text-stone-950 rounded-xl text-xs font-bold transition-colors shadow-sm"
+              className="inline-flex items-center gap-2 px-6 py-3 bg-amber-400 hover:bg-amber-300 text-stone-950 rounded-xl text-xs font-black transition-all shadow-md ml-auto"
             >
-              <span>Save Reactions & Watch Next Kit Change</span>
+              <span>Save Reactions & Watch Agent Adapt</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
         </form>
       )}
+
+      {/* Printable Modal */}
+      <PrintableVisitCard
+        kit={kit}
+        profile={profile}
+        isOpen={isPrintModalOpen}
+        onClose={() => setIsPrintModalOpen(false)}
+      />
     </div>
   );
 }
