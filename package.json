@@ -1,7 +1,7 @@
 {
-  "name": "back-then",
+  "name": "common-ground",
   "version": "1.0.0",
-  "description": "",
+  "description": "Common Ground: a Qloo-powered agent that plans a night two people will both enjoy",
   "main": "index.js",
   "scripts": {
     "dev": "next dev",
@@ -11,7 +11,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "clsx": "^2.1.1",
     "lucide-react": "^1.55.0",

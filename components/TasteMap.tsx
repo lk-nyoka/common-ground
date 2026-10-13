@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { TasteEntity, Domain, ProvenanceType } from '../lib/types';
+import { TasteEntity, Domain, QlooStatus } from '../lib/types';
+import { eraUnchecked } from '../lib/care-logic';
 import { 
   Sparkles, 
   Music, 
@@ -22,11 +23,14 @@ interface TasteMapProps {
   lovedOneName: string;
   eraStart: number;
   eraEnd: number;
-  isLiveApi?: boolean;
+  qlooStatus?: QlooStatus;
 }
 
-export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd, isLiveApi = false }: TasteMapProps) {
-  const [selectedNode, setSelectedNode] = useState<TasteEntity | null>(nodes[0] || null);
+export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd, qlooStatus }: TasteMapProps) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedNode = nodes.find((n) => n.id === selectedId) || nodes[0] || null;
+  const setSelectedNode = (n: TasteEntity) => setSelectedId(n.id);
+  const qlooCount = nodes.filter((n) => n.provenance !== 'family').length;
   const [domainFilter, setDomainFilter] = useState<'all' | Domain>('all');
 
   const filteredNodes = nodes.filter((n) => domainFilter === 'all' || n.domain === domainFilter);
@@ -51,14 +55,14 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd, isLiveApi = fa
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
             <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-            🟡 Untested (Qloo Discovery)
+            🟡 Untested
           </span>
         );
     }
   };
 
-  const getProvenanceBadge = (prov: ProvenanceType) => {
-    switch (prov) {
+  const getProvenanceBadge = (node: TasteEntity) => {
+    switch (node.provenance) {
       case 'qloo_live':
         return (
           <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
@@ -67,14 +71,14 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd, isLiveApi = fa
         );
       case 'qloo_saved':
         return (
-          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-100 text-amber-900 border border-amber-300">
-            Qloo (saved result)
+          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-sky-100 text-sky-900 border border-sky-300">
+            Qloo (saved{node.capturedAt ? ` ${node.capturedAt.slice(0, 10)}` : ''})
           </span>
         );
       default:
         return (
-          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-stone-100 text-stone-600 border border-stone-200">
-            Placeholder — not Qloo data
+          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-stone-100 text-stone-700 border border-stone-200">
+            Family memory
           </span>
         );
     }
@@ -90,6 +94,8 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd, isLiveApi = fa
         return <Utensils className="w-4 h-4 text-amber-600" />;
       case 'place':
         return <MapPin className="w-4 h-4 text-emerald-600" />;
+      case 'tv':
+        return <Film className="w-4 h-4 text-sky-600" />;
       default:
         return <Sparkles className="w-4 h-4 text-stone-600" />;
     }
@@ -98,11 +104,25 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd, isLiveApi = fa
   return (
     <div className="bg-stone-50 border border-stone-200 rounded-3xl p-6 sm:p-8 shadow-sm">
       {/* Honest Connection Status Banner */}
-      {!isLiveApi && (
+      {qlooStatus && qlooStatus !== 'live' && (
         <div className="mb-5 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2.5 text-xs text-amber-900">
           <Info className="w-4 h-4 text-amber-700 shrink-0" />
           <span>
-            <strong>Qloo key not connected:</strong> Showing saved sample results for demonstration. When a key is added, live queries run against <code className="font-mono bg-amber-100 px-1 py-0.5 rounded">https://hackathon.api.qloo.com</code>.
+            {qlooStatus === 'saved' && (
+              <>
+                <strong>Qloo key not set:</strong> discoveries below are real Qloo responses saved from earlier live calls.
+              </>
+            )}
+            {qlooStatus === 'not_connected' && (
+              <>
+                <strong>Qloo isn&apos;t connected yet:</strong> only the family&apos;s own memories are shown. Discoveries appear once a Qloo API key is added. Nothing is invented in the meantime.
+              </>
+            )}
+            {qlooStatus === 'error' && (
+              <>
+                <strong>Qloo didn&apos;t answer:</strong> showing what is already known. See the agent trace in the visit kit for the error.
+              </>
+            )}
           </span>
         </div>
       )}
@@ -119,7 +139,7 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd, isLiveApi = fa
             </span>
           </div>
           <p className="text-xs sm:text-sm text-stone-600 mt-1 max-w-2xl leading-relaxed">
-            Confirmed favourites sit in the centre with Qloo’s discoveries fanning out around them. Nodes reflect group cultural affinities within her youth era, not individual medical predictions.
+            Family favourites plus {qlooCount} {qlooCount === 1 ? 'discovery' : 'discoveries'} from Qloo, each linked to the favourite it came from. Discoveries reflect what people with similar tastes like, not predictions about one person.
           </p>
         </div>
 
@@ -137,7 +157,7 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd, isLiveApi = fa
         {/* Domain Filters */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-stone-500 font-semibold mr-1">Filter by:</span>
-          {(['all', 'music', 'film', 'food', 'place'] as const).map((dom) => (
+          {(['all', 'music', 'film', 'tv', 'food', 'place'] as const).map((dom) => (
             <button
               key={dom}
               onClick={() => setDomainFilter(dom)}
@@ -156,13 +176,13 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd, isLiveApi = fa
         <div className="flex flex-wrap items-center gap-3 text-stone-600">
           <span className="font-semibold text-stone-800">Status:</span>
           <span className="inline-flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Green (Worked)
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Worked
           </span>
           <span className="inline-flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span> Amber (Untested)
+            <HelpCircle className="w-3.5 h-3.5 text-amber-600" /> Untested
           </span>
           <span className="inline-flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span> Red (Avoid)
+            <AlertCircle className="w-3.5 h-3.5 text-rose-600" /> Avoid
           </span>
         </div>
       </div>
@@ -174,7 +194,7 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd, isLiveApi = fa
           <div className="flex items-center justify-between mb-3">
             <span className="text-[11px] font-mono text-stone-500 uppercase tracking-wider flex items-center gap-1.5">
               <Layers className="w-3.5 h-3.5" />
-              <span>Cultural Affinity Constellation</span>
+              <span>Taste map</span>
             </span>
             <span className="text-[11px] font-mono text-stone-400">
               {filteredNodes.length} nodes active
@@ -209,7 +229,7 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd, isLiveApi = fa
                       {getDomainIcon(node.domain)}
                     </span>
                     <div className="flex items-center gap-1">
-                      {getProvenanceBadge(node.provenance)}
+                      {getProvenanceBadge(node)}
                     </div>
                   </div>
 
@@ -217,7 +237,7 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd, isLiveApi = fa
                     <div className="text-xs font-bold text-stone-900 leading-snug group-hover:text-stone-950">
                       {node.name.split('—')[0].trim()}
                     </div>
-                    {node.sourceSeed && (
+                    {node.sourceSeed && node.provenance !== 'family' && (
                       <div className="text-[11px] text-amber-900 font-medium mt-1 truncate">
                         via {node.sourceSeed}
                       </div>
@@ -228,15 +248,19 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd, isLiveApi = fa
                     <span className="font-semibold text-stone-600">
                       Confidence: {node.confidence}
                     </span>
-                    <span
-                      className={`w-2.5 h-2.5 rounded-full ${
-                        node.status === 'worked'
-                          ? 'bg-emerald-500 ring-2 ring-emerald-200'
-                          : node.status === 'avoid'
-                          ? 'bg-rose-500'
-                          : 'bg-amber-500 ring-2 ring-amber-200'
-                      }`}
-                    ></span>
+                    <span className="inline-flex items-center gap-1.5">
+                      {eraUnchecked(node) && (
+                        <span className="px-1.5 py-0.5 rounded bg-stone-100 border border-stone-200 text-stone-600 font-medium">Era not checked</span>
+                      )}
+                      {/* Icon plus colour, so status doesn't rely on colour alone */}
+                      {node.status === 'worked' ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" aria-label="Worked" />
+                      ) : node.status === 'avoid' ? (
+                        <AlertCircle className="w-4 h-4 text-rose-600" aria-label="Avoid" />
+                      ) : (
+                        <HelpCircle className="w-4 h-4 text-amber-600" aria-label="Untested" />
+                      )}
+                    </span>
                   </div>
                 </button>
               );
@@ -264,7 +288,13 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd, isLiveApi = fa
                   {selectedNode.year && (
                     <>
                       <span>•</span>
-                      <span>Release: <strong>{selectedNode.year}</strong></span>
+                      <span>Year: <strong>{selectedNode.year}</strong></span>
+                    </>
+                  )}
+                  {!selectedNode.year && selectedNode.activeFrom && (
+                    <>
+                      <span>•</span>
+                      <span>Active from <strong>{selectedNode.activeFrom}</strong></span>
                     </>
                   )}
                   {selectedNode.qlooEntityType && (
@@ -284,10 +314,10 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd, isLiveApi = fa
                   <span className="font-mono text-[10px] uppercase font-bold text-amber-900 tracking-wider">
                     Data Source & Affinity
                   </span>
-                  {getProvenanceBadge(selectedNode.provenance)}
+                  {getProvenanceBadge(selectedNode)}
                 </div>
                 <p className="text-xs text-stone-800 leading-relaxed font-medium mt-1">
-                  {selectedNode.sourceReason || 'Original seed provided by family.'}
+                  {selectedNode.sourceReason || 'Family memory.'}
                 </p>
               </div>
 
@@ -313,7 +343,15 @@ export function TasteMap({ nodes, lovedOneName, eraStart, eraEnd, isLiveApi = fa
                     {eraStart}–{eraEnd}
                   </span>
                   <p className="text-[10px] text-stone-600 mt-0.5 leading-tight">
-                    Kept within youth bounds
+                    {selectedNode.year
+                      ? selectedNode.year <= eraEnd
+                        ? `${selectedNode.year}: within the era`
+                        : `${selectedNode.year}: after the era`
+                      : selectedNode.activeFrom
+                      ? `Active from ${selectedNode.activeFrom}: started within the era`
+                      : selectedNode.provenance === 'family'
+                      ? 'Family memory'
+                      : 'Era not checked: Qloo gives no year for this'}
                   </p>
                 </div>
               </div>

@@ -95,14 +95,19 @@ export function PrintableVisitCard({ kit, profile, isOpen, onClose }: PrintableV
                   <div className="text-[11px] text-amber-900 mt-0.5">{item.sourceReason}</div>
                 </div>
               ))}
-              <div className="p-2.5 bg-purple-50/70 border border-purple-200 rounded-lg">
-                <div className="font-bold text-stone-900">
-                  Hypothesis: {kit.hypothesis.name}
+              {kit.hypothesis && (
+                <div className="p-2.5 bg-purple-50/70 border border-purple-200 rounded-lg">
+                  <div className="font-bold text-stone-900">
+                    Experiment: {kit.hypothesis.name}
+                  </div>
+                  <div className="text-[11px] text-purple-950 mt-0.5 italic">
+                    🏷️ {kit.hypothesis.hypothesisLabel}
+                  </div>
                 </div>
-                <div className="text-[11px] text-purple-950 mt-0.5 italic">
-                  🏷️ {kit.hypothesis.hypothesisLabel}
-                </div>
-              </div>
+              )}
+              {kit.qlooDiscoveries.length === 0 && !kit.hypothesis && (
+                <div className="text-[11px] text-stone-600">Nothing new this visit: just the familiar favourites.</div>
+              )}
             </div>
           </div>
 

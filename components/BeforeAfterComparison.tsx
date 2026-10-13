@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { VisitKit, VisitLog } from '../lib/types';
+import { DomainStats, VisitKit, VisitLog } from '../lib/types';
+import { MemoryPortrait } from './MemoryPortrait';
 import { CheckCircle2, ArrowRight, ShieldCheck, Sparkles, RefreshCw } from 'lucide-react';
 
 interface BeforeAfterComparisonProps {
@@ -9,6 +10,7 @@ interface BeforeAfterComparisonProps {
   nextKit: VisitKit;
   latestLog: VisitLog;
   lovedOneName: string;
+  stats: DomainStats;
   onResetDemo?: () => void;
 }
 
@@ -17,24 +19,35 @@ export function BeforeAfterComparison({
   nextKit,
   latestLog,
   lovedOneName,
+  stats,
   onResetDemo
 }: BeforeAfterComparisonProps) {
+  const moments = latestLog.goodMoments ?? 0;
   return (
     <div className="space-y-6 bg-stone-900 text-stone-100 rounded-2xl p-6 shadow-xl border border-stone-800">
       {/* Agent Learning Reflection Header */}
       <div className="border-b border-stone-800 pb-5">
         <div className="flex items-center gap-2 text-amber-400 text-xs font-mono uppercase tracking-wider mb-2">
           <Sparkles className="w-4 h-4" />
-          <span>The Agent Learned & Adapted</span>
+          <span>What the agent learned</span>
         </div>
         <h3 className="font-serif text-2xl font-bold text-white">
-          "What I Learned from Visiting {lovedOneName}"
+          {moments > 0
+            ? `You created ${moments} good ${moments === 1 ? 'moment' : 'moments'} with ${lovedOneName} today.`
+            : `No big moments this time, and that's useful to know too.`}
         </h3>
+
+        {latestLog.agentReflections.experimentResult && (
+          <div className="mt-3 p-3.5 bg-purple-950/50 border border-purple-800/80 rounded-xl text-purple-100 text-xs leading-relaxed">
+            <span className="font-bold text-purple-300">🧪 </span>
+            {latestLog.agentReflections.experimentResult}
+          </div>
+        )}
 
         {/* Pattern-level insight ("I noticed something") */}
         {latestLog.agentReflections.patternLevel && (
           <div className="mt-3 p-3.5 bg-amber-950/60 border border-amber-800/80 rounded-xl text-amber-200 text-xs leading-relaxed">
-            <span className="font-bold text-amber-400">💡 Pattern Observed: </span>
+            <span className="font-bold text-amber-400">💡 </span>
             {latestLog.agentReflections.patternLevel}
           </div>
         )}
@@ -58,6 +71,8 @@ export function BeforeAfterComparison({
         </div>
       </div>
 
+      <MemoryPortrait name={lovedOneName} stats={stats} dark />
+
       {/* Side-by-Side Before vs. After View */}
       <div>
         <div className="flex items-center justify-between mb-3">
@@ -65,7 +80,7 @@ export function BeforeAfterComparison({
             Before & After: How the Kit Changed
           </h4>
           <span className="text-[11px] font-mono text-stone-400">
-            Zero Guesswork · Closed Care Loop
+            Built from the reactions you just logged
           </span>
         </div>
 
@@ -92,7 +107,7 @@ export function BeforeAfterComparison({
                   Qloo Discovery Tested:
                 </span>
                 <span className="text-stone-200">
-                  {previousKit.qlooDiscoveries.map((q) => q.name.split('—')[0]).join(', ')}
+                  {previousKit.qlooDiscoveries.map((q) => q.name.split('—')[0]).join(', ') || 'None'}
                 </span>
               </div>
 
@@ -101,7 +116,7 @@ export function BeforeAfterComparison({
                   Hypothesis Tested:
                 </span>
                 <span className="text-stone-300 italic">
-                  {previousKit.hypothesis.name.split('—')[0]}
+                  {previousKit.hypothesis ? previousKit.hypothesis.name.split('—')[0] : 'None'}
                 </span>
               </div>
             </div>
@@ -131,7 +146,7 @@ export function BeforeAfterComparison({
                   Next Qloo Discovery:
                 </span>
                 <span className="text-stone-100 font-medium">
-                  {nextKit.qlooDiscoveries.map((q) => q.name.split('—')[0]).join(', ')}
+                  {nextKit.qlooDiscoveries.map((q) => q.name.split('—')[0]).join(', ') || 'None (nothing new from Qloo)'}
                 </span>
               </div>
 
@@ -140,7 +155,7 @@ export function BeforeAfterComparison({
                   New Labelled Hypothesis:
                 </span>
                 <span className="text-amber-200 italic font-medium">
-                  {nextKit.hypothesis.hypothesisLabel}
+                  {nextKit.hypothesis?.hypothesisLabel || 'No experiment this time'}
                 </span>
               </div>
             </div>
@@ -152,7 +167,7 @@ export function BeforeAfterComparison({
       {onResetDemo && (
         <div className="pt-3 border-t border-stone-800 flex items-center justify-between text-xs">
           <span className="text-stone-400">
-            Judge path completed in under 45 seconds.
+            Sample family: reset to start again.
           </span>
           <button
             onClick={onResetDemo}

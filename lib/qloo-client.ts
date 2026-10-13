@@ -1,214 +1,296 @@
-import { Domain, TasteEntity, ProvenanceType } from './types';
+/**
+ * Qloo client (server-side only).
+ *
+ * Honesty rules this file enforces:
+ * - Data is labelled 'live' only when it came from a Qloo API call just now.
+ * - Data is labelled 'saved' only when it is a real Qloo response that was captured to
+ *   data/qloo-fixtures/ by an earlier live call (set QLOO_CAPTURE=true locally to capture).
+ *   Qloo's terms allow private server-side caching but not publishing their data in a public
+ *   repo, so that folder is git-ignored: it is a local backup, not part of the deployed app.
+ * - Otherwise the result is 'unavailable' and empty. Nothing is invented here.
+ *
+ * Privacy: only cultural search strings and Qloo entity IDs are sent to Qloo.
+ */
+import { createHash } from 'crypto';
+import { promises as fs } from 'fs';
+import path from 'path';
+import { QlooEntity, QlooResult } from './types';
 
-interface QlooSearchResult {
-  id: string;
-  name: string;
-  type?: string;
-  year?: number;
-  tags?: string[];
-  description?: string;
-  provenance: ProvenanceType;
+const BASE_URL = process.env.QLOO_BASE_URL || 'https://hackathon.api.qloo.com';
+const FIXTURE_DIR = path.join(process.cwd(), 'data', 'qloo-fixtures');
+const TIMEOUT_MS = 8000;
+
+/**
+ * Short-lived in-memory cache of live responses (Qloo allows private server-side caching).
+ * Makes repeat demos fast and saves quota. It lives only as long as the server process.
+ */
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const cache = new Map<string, { raw: unknown; at: number }>();
+
+/**
+ * Qloo rate-limits the hackathon key, so live calls go through a small limiter
+ * (at most 2 at a time) and are retried on HTTP 429 with backoff.
+ */
+const MAX_CONCURRENT = 2;
+let active = 0;
+const waiting: Array<() => void> = [];
+async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (active >= MAX_CONCURRENT) await new Promise<void>((resolve) => waiting.push(resolve));
+  active++;
+  try {
+    return await fn();
+  } finally {
+    active--;
+    waiting.shift()?.();
+  }
+}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export function qlooKeyIsSet(): boolean {
+  return Boolean(process.env.QLOO_API_KEY);
 }
 
-const BASE_URL = 'https://hackathon.api.qloo.com';
-
-/**
- * Saved Qloo response fixtures for offline / demonstration testing.
- * Strictly labeled as 'qloo_saved' — never falsely claimed as live API output.
- */
-const SAVED_QLOO_FIXTURES: Record<string, {
-  name: string;
-  domain: Domain;
-  year: number;
-  type: string;
-  related: Array<{
-    name: string;
-    domain: Domain;
-    year: number;
-    relation: string;
-    affinity: number;
-    type: string;
-  }>;
-}> = {
-  'miriam makeba': {
-    name: 'Miriam Makeba',
-    domain: 'music',
-    year: 1957,
-    type: 'urn:entity:artist',
-    related: [
-      { name: 'Dorothy Masuka — "Hamba Nontsokolo"', domain: 'music', year: 1956, relation: 'People with affinity for Miriam Makeba often connect with contemporary Soweto vocal jazz', affinity: 0.94, type: 'urn:entity:artist' },
-      { name: 'Spokes Mashiyane (Pennywhistle Kwela)', domain: 'music', year: 1958, relation: 'Associated with Sophiatown kwela sound', affinity: 0.91, type: 'urn:entity:artist' },
-      { name: 'The Manhattan Brothers — Vocal Harmonies', domain: 'music', year: 1954, relation: 'Associated through early vocal ensemble collaboration', affinity: 0.89, type: 'urn:entity:artist' }
-    ]
-  },
-  'patsy cline': {
-    name: 'Patsy Cline',
-    domain: 'music',
-    year: 1961,
-    type: 'urn:entity:artist',
-    related: [
-      { name: 'Brenda Lee — "I\'m Sorry"', domain: 'music', year: 1960, relation: 'People with affinity for Patsy Cline frequently connect with 1960s Nashville Sound peers', affinity: 0.92, type: 'urn:entity:artist' },
-      { name: 'Loretta Lynn — Early Country Ballads', domain: 'music', year: 1966, relation: 'Associated through traditional country storytelling', affinity: 0.88, type: 'urn:entity:artist' }
-    ]
-  },
-  'sophiatown': {
-    name: 'Sophiatown',
-    domain: 'place',
-    year: 1955,
-    type: 'urn:entity:place',
-    related: [
-      { name: 'Spokes Mashiyane (Pennywhistle Kwela)', domain: 'music', year: 1958, relation: 'Cultural cradle of kwela street jazz', affinity: 0.93, type: 'urn:entity:artist' },
-      { name: 'Come Back, Africa (1959 Sophiatown Film)', domain: 'film', year: 1959, relation: 'Landmark historical documentary drama filmed in Sophiatown', affinity: 0.87, type: 'urn:entity:movie' }
-    ]
-  },
-  'the sound of music': {
-    name: 'The Sound of Music',
-    domain: 'film',
-    year: 1965,
-    type: 'urn:entity:movie',
-    related: [
-      { name: 'Julie Andrews — "Edelweiss"', domain: 'music', year: 1965, relation: 'Acoustic vocal nostalgia from soundtrack', affinity: 0.95, type: 'urn:entity:artist' },
-      { name: 'Mary Poppins Soundtrack', domain: 'film', year: 1964, relation: 'Mid-1960s family musical affinity overlap', affinity: 0.89, type: 'urn:entity:movie' }
-    ]
+export async function savedFixtureCount(): Promise<number> {
+  try {
+    const files = await fs.readdir(FIXTURE_DIR);
+    return files.filter((f) => f.endsWith('.json')).length;
+  } catch {
+    return 0;
   }
-};
+}
+
+/** Canonical request string: endpoint plus sorted query params. Used as the fixture key. */
+function canonical(endpoint: string, params: Record<string, string>): string {
+  const sorted = Object.keys(params)
+    .sort()
+    .map((k) => `${k}=${params[k]}`)
+    .join('&');
+  return `${endpoint}?${sorted}`;
+}
+
+function fixtureName(endpoint: string, params: Record<string, string>): string {
+  const key = canonical(endpoint, params);
+  const hash = createHash('sha1').update(key).digest('hex').slice(0, 10);
+  const label = (params.query || params['signal.interests.entities'] || 'request')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .slice(0, 40);
+  const kind = endpoint.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '');
+  return `${kind}__${label}__${hash}.json`;
+}
+
+async function readFixture(name: string): Promise<{ capturedAt: string; response: unknown } | null> {
+  try {
+    const raw = await fs.readFile(path.join(FIXTURE_DIR, name), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.response) return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeFixture(name: string, request: string, response: unknown) {
+  if (process.env.QLOO_CAPTURE !== 'true') return;
+  try {
+    await fs.mkdir(FIXTURE_DIR, { recursive: true });
+    const body = { capturedAt: new Date().toISOString(), request, response };
+    await fs.writeFile(path.join(FIXTURE_DIR, name), JSON.stringify(body, null, 2), 'utf8');
+  } catch (err) {
+    // Read-only filesystems (e.g. Vercel) can't capture; that's fine.
+    console.warn('Could not save Qloo fixture:', err);
+  }
+}
 
 /**
- * Searches Qloo entities.
- * CRITICAL PRIVACY RULE: Sends ONLY non-identifying cultural strings to Qloo.
- * Never sends user names, ages, diagnoses, or notes.
+ * GET a Qloo endpoint. Tries live first (if a key is set), then a captured fixture.
+ * Returns the raw JSON so callers can parse it, plus where it came from.
  */
-export async function searchQlooEntities(query: string, type?: string): Promise<QlooSearchResult[]> {
+async function qlooGet(
+  endpoint: string,
+  params: Record<string, string>
+): Promise<{ source: 'live' | 'saved' | 'unavailable'; raw: any; capturedAt?: string; error?: string; status?: number }> {
+  const name = fixtureName(endpoint, params);
+  const request = canonical(endpoint, params);
   const apiKey = process.env.QLOO_API_KEY;
+  let error: string | undefined;
+  let status: number | undefined;
+
+  const hit = cache.get(request);
+  if (apiKey && hit && Date.now() - hit.at < CACHE_TTL_MS) return { source: 'live', raw: hit.raw };
 
   if (apiKey) {
     try {
-      let path = `${BASE_URL}/search?query=${encodeURIComponent(query)}`;
-      if (type) path += `&types=${encodeURIComponent(type)}`;
-
-      const res = await fetch(path, {
-        headers: {
-          'X-Api-Key': apiKey,
-          'Accept': 'application/json'
-        },
-        cache: 'no-store'
-      });
-
+      const url = `${BASE_URL}${endpoint}?${new URLSearchParams(params).toString()}`;
+      let res: Response | undefined;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        res = await withSlot(async () => {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+          try {
+            return await fetch(url, { headers: { 'X-Api-Key': apiKey, Accept: 'application/json' }, cache: 'no-store', signal: controller.signal });
+          } finally {
+            clearTimeout(timer);
+          }
+        });
+        if (res.status !== 429) break;
+        const retryAfter = Number(res.headers.get('retry-after'));
+        await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 5000) : 700 * 2 ** attempt);
+      }
+      if (!res) throw new Error('no response');
+      status = res.status;
       if (res.ok) {
-        const json = await res.json();
-        const items = json.results || json.data || json.entities || [];
-        if (Array.isArray(items) && items.length > 0) {
-          return items.map((it: any) => ({
-            id: it.id || it.entity_id,
-            name: it.name || it.title,
-            type: it.type,
-            year: it.year || it.release_year,
-            tags: it.tags,
-            provenance: 'qloo_live'
-          }));
-        }
+        const raw = await res.json();
+        if (cache.size > 500) cache.clear();
+        cache.set(request, { raw, at: Date.now() });
+        await writeFixture(name, request, raw);
+        return { source: 'live', raw };
       }
-    } catch (err) {
-      console.warn('Live Qloo API call failed, falling back to saved fixtures:', err);
+      const text = await res.text().catch(() => '');
+      error = `Qloo returned HTTP ${res.status}${text ? `: ${text.slice(0, 200)}` : ''}`;
+    } catch (err: any) {
+      error = err?.name === 'AbortError' ? 'Qloo request timed out' : `Qloo request failed: ${err?.message || err}`;
     }
+  } else {
+    error = 'QLOO_API_KEY is not set';
   }
 
-  // Saved fixture matching
-  const cleanQ = query.toLowerCase().trim();
-  const matchKey = Object.keys(SAVED_QLOO_FIXTURES).find((k) => cleanQ.includes(k) || k.includes(cleanQ));
+  const saved = await readFixture(name);
+  if (saved) return { source: 'saved', raw: saved.response, capturedAt: saved.capturedAt };
 
-  if (matchKey) {
-    const entry = SAVED_QLOO_FIXTURES[matchKey];
-    return [
-      {
-        id: `qloo-${matchKey.replace(/\s+/g, '-')}`,
-        name: entry.name,
-        type: entry.type,
-        year: entry.year,
-        provenance: 'qloo_saved'
-      }
-    ];
+  return { source: 'unavailable', raw: null, error, status };
+}
+
+function toYear(v: unknown): number | undefined {
+  if (typeof v === 'number' && v > 1800 && v < 2100) return Math.round(v);
+  if (typeof v === 'string') {
+    const m = v.match(/(1[89]\d\d|20\d\d)/);
+    if (m) return parseInt(m[1], 10);
   }
+  return undefined;
+}
 
-  // Explicit placeholder for unrecognised queries without an API key
-  return [
-    {
-      id: `placeholder-${cleanQ.replace(/[^a-z0-9]/g, '-')}`,
-      name: query,
-      type: type || 'urn:entity:artist',
-      year: undefined,
-      provenance: 'placeholder'
-    }
-  ];
+/** Normalise one raw Qloo entity. Defensive, because response shapes vary by endpoint. */
+function normaliseEntity(e: any, fallbackType?: string): QlooEntity | null {
+  if (!e || typeof e !== 'object') return null;
+  const id = e.entity_id || e.id;
+  const name = e.name || e.title;
+  if (!id || !name) return null;
+  const props = e.properties || {};
+  // Insights results say type "urn:entity" and put the real type in "subtype";
+  // search results use a "types" array. Prefer whichever is specific.
+  const specific = (t: unknown): t is string => typeof t === 'string' && /^urn:entity:[a-z_]+$/.test(t);
+  const type =
+    [e.subtype, e.type, ...(Array.isArray(e.types) ? e.types : []), fallbackType].find(specific) ||
+    e.type ||
+    'unknown';
+  const year =
+    toYear(props.release_year) ??
+    toYear(props.release_date) ??
+    toYear(props.year) ??
+    toYear(e.release_year) ??
+    toYear(e.year);
+  const affinity = typeof e.query?.affinity === 'number' ? e.query.affinity : undefined;
+  return {
+    id: String(id),
+    name: String(name),
+    type,
+    year,
+    activeFrom: toYear(props.start_year),
+    activeTo: toYear(props.end_year),
+    image: typeof props.image?.url === 'string' ? props.image.url : undefined,
+    tags: Array.isArray(e.tags) ? e.tags.map((t: any) => t?.name).filter(Boolean) : undefined,
+    contentRating: typeof props.content_rating === 'string' ? props.content_rating : undefined,
+    description: props.short_description || props.description || e.disambiguation || undefined,
+    popularity: typeof e.popularity === 'number' ? e.popularity : undefined,
+    affinity
+  };
+}
+
+/** Pull an entity array out of whichever shape the response uses. */
+function extractEntities(raw: any): any[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (Array.isArray(raw.results)) return raw.results; // /search
+  if (Array.isArray(raw.results?.entities)) return raw.results.entities; // /v2/insights
+  if (Array.isArray(raw.entities)) return raw.entities;
+  if (Array.isArray(raw.data)) return raw.data;
+  return [];
+}
+
+/** Search Qloo for an entity by name. */
+export async function qlooSearch(query: string, type?: string, take = 5): Promise<QlooResult<QlooEntity[]>> {
+  const params: Record<string, string> = { query, take: String(take) };
+  if (type) params.types = type;
+  const res = await qlooGet('/search', params);
+  const data = extractEntities(res.raw)
+    .map((e) => normaliseEntity(e, type))
+    .filter((e): e is QlooEntity => Boolean(e))
+    .slice(0, take);
+  return { source: res.source, data, capturedAt: res.capturedAt, error: res.error };
 }
 
 /**
- * Generates cross-domain recommendations from Qloo graph.
- * Honors era guardrails and avoid list exclusions.
+ * Entities of `targetType` that people with an affinity for `entityId` also like.
+ * For films and TV, also sends filter.release_year.max. Qloo silently ignores parameters it
+ * doesn't support, so the era guardrail is always applied again after the call.
  */
-export async function getQlooInsights(
+let yearFilterRejected = false;
+
+export async function qlooRelated(
   entityId: string,
   targetType: string,
-  seedName: string,
-  take: number = 4
-): Promise<Array<{ name: string; domain: Domain; year?: number; reason: string; provenance: ProvenanceType; type: string }>> {
-  const apiKey = process.env.QLOO_API_KEY;
+  opts: { take?: number; maxYear?: number } = {}
+): Promise<QlooResult<QlooEntity[]> & { yearFilterApplied: boolean }> {
+  const take = opts.take ?? 8;
+  const base: Record<string, string> = {
+    'filter.type': targetType,
+    'signal.interests.entities': entityId,
+    take: String(take)
+  };
 
-  if (apiKey && !entityId.startsWith('placeholder-')) {
-    try {
-      const path = `${BASE_URL}/v2/insights?filter.type=${encodeURIComponent(targetType)}&signal.interests.entities=${encodeURIComponent(entityId)}&take=${take}`;
-      const res = await fetch(path, {
-        headers: {
-          'X-Api-Key': apiKey,
-          'Accept': 'application/json'
-        },
-        cache: 'no-store'
-      });
-
-      if (res.ok) {
-        const json = await res.json();
-        const entities = json.entities || json.results || [];
-        if (Array.isArray(entities) && entities.length > 0) {
-          return entities.map((e: any) => ({
-            name: e.name || e.title,
-            domain: targetType.includes('movie') ? 'film' : targetType.includes('place') ? 'place' : 'music',
-            year: e.year || e.release_year || undefined,
-            reason: `People with affinity for ${seedName} often connect with this item (Qloo Live)`,
-            provenance: 'qloo_live',
-            type: targetType
-          }));
-        }
-      }
-    } catch (err) {
-      console.warn('Qloo Insights API failed, falling back to saved fixtures:', err);
+  const yearCapable = targetType === 'urn:entity:movie' || targetType === 'urn:entity:tv_show';
+  if (yearCapable && opts.maxYear && !yearFilterRejected) {
+    const withYear = { ...base, 'filter.release_year.max': String(opts.maxYear) };
+    const res = await qlooGet('/v2/insights', withYear);
+    if (res.source !== 'unavailable') {
+      const data = extractEntities(res.raw)
+        .map((e) => normaliseEntity(e, targetType))
+        .filter((e): e is QlooEntity => Boolean(e));
+      return { source: res.source, data, capturedAt: res.capturedAt, yearFilterApplied: true };
     }
+    // Qloo rejected the year filter: stop sending it and filter by year after the call instead.
+    if (res.status === 400) yearFilterRejected = true;
+    // Otherwise (no key, timeout) fall through: a saved response without the filter may exist.
   }
 
-  // Use Saved Fixtures
-  const cleanSeed = seedName.toLowerCase().trim();
-  const matchKey = Object.keys(SAVED_QLOO_FIXTURES).find((k) => cleanSeed.includes(k) || k.includes(cleanSeed));
+  const res = await qlooGet('/v2/insights', base);
+  const data = extractEntities(res.raw)
+    .map((e) => normaliseEntity(e, targetType))
+    .filter((e): e is QlooEntity => Boolean(e));
+  return { source: res.source, data, capturedAt: res.capturedAt, error: res.error, yearFilterApplied: false };
+}
 
-  if (matchKey) {
-    const entry = SAVED_QLOO_FIXTURES[matchKey];
-    return entry.related.slice(0, take).map((r) => ({
-      name: r.name,
-      domain: r.domain,
-      year: r.year,
-      reason: r.relation,
-      provenance: 'qloo_saved',
-      type: r.type
-    }));
-  }
+export interface QlooSharedTag {
+  name: string;
+  subtype: string;
+  score: number;
+}
 
-  // Explicit placeholder for queries without Qloo data
-  return [
-    {
-      name: `${seedName} Contemporary Vocal Peer`,
-      domain: 'music',
-      year: undefined,
-      reason: `Placeholder discovery for ${seedName} — connect Qloo API key for verified data`,
-      provenance: 'placeholder',
-      type: 'urn:entity:artist'
-    }
-  ];
+/**
+ * Qloo's compare endpoint: the taste tags two sets of entities have in common.
+ * GET /v2/insights/compare?a.signal.interests.entities=...&b.signal.interests.entities=...
+ */
+export async function qlooCompare(aIds: string[], bIds: string[], take = 12): Promise<QlooResult<QlooSharedTag[]>> {
+  const params: Record<string, string> = {
+    'a.signal.interests.entities': aIds.join(','),
+    'b.signal.interests.entities': bIds.join(','),
+    take: String(take)
+  };
+  const res = await qlooGet('/v2/insights/compare', params);
+  const tags: any[] = Array.isArray(res.raw?.results?.tags) ? res.raw.results.tags : [];
+  const data = tags
+    .filter((t) => t && t.name)
+    .map((t) => ({ name: String(t.name), subtype: String(t.subtype || ''), score: typeof t.query?.score === 'number' ? t.query.score : 0 }));
+  return { source: res.source, data, capturedAt: res.capturedAt, error: res.error };
 }

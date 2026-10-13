@@ -25,8 +25,15 @@ yarn-error.log*
 # local env files (never commit API keys!)
 .env*.local
 .env
+# any other env file, including ones Windows saved as .txt
+.env*
 !.env.example
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Captured Qloo responses: Qloo's terms forbid publishing their data in a public repo.
+/data/qloo-fixtures/*.json
+# Comparison script output (contains Qloo response data)
+/results/

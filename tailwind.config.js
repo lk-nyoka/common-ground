@@ -8,7 +8,19 @@ module.exports = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        display: ['Fraunces', 'Georgia', 'serif']
+      },
       colors: {
+        paper: '#F6F4EF',
+        card: '#FFFFFF',
+        ink: '#1A1714',
+        muted: '#6E6860',
+        line: '#E6E1D8',
+        accent: '#D9480F',
+        personA: { DEFAULT: '#5B5BD6', light: '#B4B4FF' },
+        personB: { DEFAULT: '#0E9384', light: '#7CE0D3' },
         cream: {
           50: '#FDFCF7',
           100: '#FBF8EF',

@@ -1,214 +1,408 @@
-import { CaregiverProfile, KitSlotItem, ReactionType, TasteEntity, VisitKit, VisitLog } from './types';
-
 /**
- * Care Logic Engine: Enforces dignity, safety, and learning around Qloo discoveries.
+ * Care logic: the rules Back Then applies around whatever Qloo returns.
+ * Pure functions, safe on client or server. No invented content: every item in a kit
+ * is either a family memory or a Qloo result, and every sentence is built from real data.
  */
+import {
+  AgentTraceStep,
+  CaregiverProfile,
+  Domain,
+  DomainStats,
+  KitSlotItem,
+  QlooStatus,
+  ReactionType,
+  SharedMoment,
+  TasteEntity,
+  VisitKit,
+  VisitLog
+} from './types';
 
-export function generateNextVisitKit(
-  profile: CaregiverProfile,
-  previousVisitReactions?: Record<string, ReactionType>
-): VisitKit {
-  const visitNum = (profile.visitHistory.length || 0) + 1;
+export const DOMAIN_LABEL: Record<Domain, string> = {
+  music: 'music',
+  film: 'films',
+  tv: 'TV',
+  food: 'food',
+  place: 'places',
+  activity: 'activities'
+};
 
-  // 1. Filter out anything on the permanent avoid list
-  const safeNodes = profile.tasteMapNodes.filter(
-    (node) => !profile.avoidList.some((avoid) => node.name.toLowerCase().includes(avoid.toLowerCase())) && node.status !== 'avoid'
+export function domainFromQlooType(type?: string): Domain {
+  if (!type) return 'music';
+  if (type.includes('artist') || type.includes('album') || type.includes('song')) return 'music';
+  if (type.includes('movie')) return 'film';
+  if (type.includes('tv_show')) return 'tv';
+  if (type.includes('place') || type.includes('destination') || type.includes('locality')) return 'place';
+  return 'activity';
+}
+
+export function shortName(name: string): string {
+  return name.split('—')[0].trim();
+}
+
+/** Lower-case and strip accents, so "Mañana" matches "manana" on the avoid list. */
+export function foldText(s: string): string {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
+/** A Qloo discovery whose era couldn't be checked (Qloo gives no year for artists). */
+export function eraUnchecked(n: TasteEntity): boolean {
+  return n.provenance !== 'family' && !n.year && !n.activeFrom;
+}
+
+/** True when an item matches anything on the avoid list (or is itself marked avoid). */
+export function isAvoided(profile: CaregiverProfile, name: string, qlooEntityId?: string): boolean {
+  const lower = foldText(name);
+  const textHit = profile.avoidList.some((a) => {
+    const av = foldText(a);
+    if (av.length < 4) return false;
+    return lower.includes(av) || (lower.length >= 4 && av.includes(lower));
+  });
+  const nodeHit = profile.tasteMapNodes.some(
+    (n) =>
+      n.status === 'avoid' &&
+      ((qlooEntityId && n.qlooEntityId === qlooEntityId) || foldText(n.name) === lower)
   );
+  return textHit || nodeHit;
+}
 
-  // 2. Identify Proven Favourites (Green / High confidence)
-  let provenCandidates = safeNodes.filter((n) => n.status === 'worked');
-  if (provenCandidates.length === 0) {
-    // If first visit, use original seeds as proven baseline
-    provenCandidates = safeNodes.slice(0, 2);
+export function tally(stats: DomainStats, d: Domain) {
+  return stats[d] || { tried: 0, litUp: 0, upset: 0 };
+}
+
+/** Domains we should not experiment with: tried, never lit up, and caused upset. */
+export function domainsToRest(stats: DomainStats): Domain[] {
+  return (Object.keys(stats) as Domain[]).filter((d) => {
+    const t = tally(stats, d);
+    return t.upset > 0 && t.litUp === 0;
+  });
+}
+
+/** Lit-up rate per domain, highest first; only domains tried at least once. */
+export function domainRanking(stats: DomainStats): Domain[] {
+  return (Object.keys(stats) as Domain[])
+    .filter((d) => tally(stats, d).tried > 0)
+    .sort((a, b) => {
+      const ta = tally(stats, a);
+      const tb = tally(stats, b);
+      return tb.litUp / tb.tried - ta.litUp / ta.tried;
+    });
+}
+
+export function mediaLinkFor(name: string, domain: Domain): TasteEntity['mediaLink'] {
+  if (domain === 'music') {
+    return { platform: 'spotify', url: `https://open.spotify.com/search/${encodeURIComponent(name)}`, label: 'Search on Spotify' };
   }
-  const provenItems: KitSlotItem[] = provenCandidates.slice(0, 2).map((n) => ({
-    ...n,
-    slotType: 'proven',
-    confidence: 'High',
-    confidenceReason: n.status === 'worked' ? 'Reached them in earlier visits' : 'Initial family favourite'
-  }));
-
-  // 3. Identify Qloo Discoveries (Medium confidence, Amber)
-  const discoveryCandidates = safeNodes.filter((n) => n.status === 'untested' && !provenItems.some((p) => p.id === n.id));
-  const discoveryItems: KitSlotItem[] = discoveryCandidates.slice(0, 1).map((n) => ({
-    ...n,
-    slotType: 'discovery',
-    confidence: 'Medium',
-    confidenceReason: n.sourceReason || 'Close cultural connection found by Qloo'
-  }));
-
-  // 4. One Hypothesis Experiment (Low confidence)
-  const remainingCandidates = safeNodes.filter(
-    (n) => n.status === 'untested' && !provenItems.some((p) => p.id === n.id) && !discoveryItems.some((d) => d.id === n.id)
-  );
-  
-  const hypothesisNode = remainingCandidates[0] || discoveryCandidates[1] || {
-    id: `hypo-${visitNum}`,
-    name: profile.seeds.place ? `${profile.seeds.place} Nostalgia Audio` : 'Acoustic Choir Melodies',
-    domain: 'place',
-    year: profile.eraStart + 5,
-    sourceSeed: profile.seeds.place || profile.seeds.music,
-    sourceReason: 'Hypothesis testing new sensory domain',
-    status: 'untested',
-    confidence: 'Low',
-    confidenceReason: "This visit's hypothesis experiment"
-  };
-
-  const hypothesisItem: KitSlotItem = {
-    ...hypothesisNode,
-    slotType: 'hypothesis',
-    confidence: 'Low',
-    hypothesisLabel: `Testing: does ${profile.lovedOneName} respond to ${hypothesisNode.domain}-based memories from ${hypothesisNode.year || 'her era'}?`
-  };
-
-  // 5. Why this kit? (Exactly 3 short, human reasons)
-  const whyReasons: string[] = [
-    `Starts on safe ground with ${provenItems.map((p) => p.name.split('—')[0].trim()).join(' and ')}.`,
-    profile.avoidList.length > 0 
-      ? `Permanently excludes ${profile.avoidList.slice(-1)[0]} to prevent distress.`
-      : `Stays strictly within ${profile.lovedOneName}’s youth era (${profile.eraStart}–${profile.eraEnd}).`,
-    `Tries one gentle experiment: ${hypothesisItem.name.split('—')[0].trim()} (${hypothesisItem.domain}).`
-  ];
-
-  // 6. One Small Shared Moment (Bedside 20-min activity)
-  const sharedMoment = {
-    title: `A Quiet Moment with ${provenItems[0]?.name.split('—')[0].trim() || 'Music'}`,
-    description: `Sit beside ${profile.lovedOneName}, play the track softly, and gently hold their hand.`,
-    actionPrompt: `Ask gently: "Do you remember hearing this on Sunday mornings?" If they close their eyes or hum, simply listen together.`
-  };
-
-  // 7. Three Conversation Openers
-  const conversationOpeners = [
-    `"I was thinking about you this morning and put on ${provenItems[0]?.name.split('—')[0].trim() || 'this melody'}."`,
-    `"Do you remember the old market walks in ${profile.homeRegion}?"`,
-    `"It feels so peaceful just sitting here with you today."`
-  ];
-
-  // 8. Two Stop Cues (Distress protection)
-  const stopCues = [
-    'If their eyes wander away, fingers tense, or they grow silent for over 2 minutes, turn off the music without fanfare and shift to quiet company.',
-    'If breathing quickens or agitation appears, never argue or press for memories. Say: "We are safe here right now," and offer a sip of water or warm blanket.'
-  ];
-
+  if (domain === 'food' || domain === 'activity') return undefined;
   return {
-    id: `kit-${profile.lovedOneName.toLowerCase()}-v${visitNum}`,
-    visitNumber: visitNum,
-    generatedAt: 'Generated on demand for this visit',
-    whyThisKit: whyReasons,
-    provenFavourites: provenItems,
-    qlooDiscoveries: discoveryItems,
-    hypothesis: hypothesisItem,
-    sharedMoment,
-    conversationOpeners,
-    stopCues
+    platform: 'youtube',
+    url: `https://www.youtube.com/results?search_query=${encodeURIComponent(name)}`,
+    label: 'Search on YouTube'
   };
 }
 
+const STOP_CUES = [
+  'If they look away, tense up, or go quiet for a couple of minutes, stop the music or clip without comment and just sit together.',
+  "If they seem distressed, don't press for memories. Switch to calm, familiar company: a hand to hold, a sip of water, a quiet voice."
+];
+
+function defaultSharedMoment(name: string, proven: KitSlotItem[], hobbies: string): SharedMoment {
+  const first = proven[0];
+  if (!first) {
+    return {
+      title: 'Quiet company',
+      description: `Sit with ${name} for a few minutes before trying anything from the kit.`,
+      actionPrompt: 'Let them set the pace. Follow whatever they bring up.'
+    };
+  }
+  const item = shortName(first.name);
+  if (first.domain === 'music') {
+    return {
+      title: `Listening to ${item} together`,
+      description: `Play one ${item} song softly. A few minutes is enough.`,
+      actionPrompt: `Ask ${name}, gently and only once: "Where were you when you used to hear this?"`
+    };
+  }
+  if (first.domain === 'food') {
+    return {
+      title: `A small taste of ${item}`,
+      description: `If it's safe for ${name} to eat, bring a small taste of ${item}.`,
+      actionPrompt: `Ask: "Who used to make this?" and let the story go wherever it goes.`
+    };
+  }
+  if (first.domain === 'place') {
+    return {
+      title: `Looking back at ${item}`,
+      description: `Look at one or two old photos of ${item} together.`,
+      actionPrompt: `Ask: "What were weekends like there?"${hobbies ? ` (Their hobbies: ${hobbies}.)` : ''}`
+    };
+  }
+  return {
+    title: `Watching a moment of ${item}`,
+    description: `Play a short clip of ${item}, two or three minutes at most.`,
+    actionPrompt: 'Ask which part they remember best.'
+  };
+}
+
+function defaultOpeners(name: string, proven: KitSlotItem[], discoveries: KitSlotItem[]): string[] {
+  const openers: string[] = [];
+  const p0 = proven[0] ? shortName(proven[0].name) : undefined;
+  const p1 = proven[1] ? shortName(proven[1].name) : undefined;
+  const d0 = discoveries[0] ? shortName(discoveries[0].name) : undefined;
+  if (p0) openers.push(`"${name}, I put on ${p0} this morning and thought of you."`);
+  if (p1) openers.push(`"Do you remember ${p1}?"`);
+  if (d0) {
+    const dom = discoveries[0].domain;
+    openers.push(
+      dom === 'music'
+        ? `"I found some music by ${d0}. Shall we listen to a little together?"`
+        : dom === 'film' || dom === 'tv'
+        ? `"I found ${d0}. Shall we watch a little together?"`
+        : `"I found something about ${d0}. Shall we have a look?"`
+    );
+  }
+  openers.push('"It\'s nice just sitting here with you today."');
+  return openers.slice(0, 3);
+}
+
+export interface KitInputs {
+  profile: CaregiverProfile;
+  candidates: TasteEntity[]; // untested Qloo items eligible for this kit (already era- and avoid-filtered)
+  picks?: { discoveryIds: string[]; hypothesisId?: string; hypothesisTests?: string };
+  writing?: { why?: string[]; openers?: string[]; sharedMoment?: SharedMoment };
+  trace: AgentTraceStep[];
+  planner: 'llm' | 'rules';
+  plannerModel?: string;
+  qlooStatus: QlooStatus;
+  notices: string[];
+}
+
+/** Assemble the visit kit: mostly familiar, a little new, never anything avoided. */
+export function assembleKit(input: KitInputs): VisitKit {
+  const { profile, candidates } = input;
+  const name = profile.lovedOneName;
+  const visitNum = profile.visitHistory.length + 1;
+
+  // 1. Proven favourites: things that have reached them (or the family's seeds on a first visit).
+  const worked = profile.tasteMapNodes.filter((n) => n.status === 'worked' && !isAvoided(profile, n.name, n.qlooEntityId));
+  // What lit them up most recently leads; untried family favourites follow in the family's order.
+  const provenSorted = [...worked].sort((a, b) => (b.lastLitUpVisit || 0) - (a.lastLitUpVisit || 0));
+  const proven: KitSlotItem[] = provenSorted.slice(0, 2).map((n) => ({ ...n, slotType: 'proven', confidence: 'High' }));
+
+  // 2. Qloo discoveries and one hypothesis, from real Qloo candidates only.
+  // Something that fell flat last visit gets a rest before it is tried again.
+  const lastVisit = profile.visitHistory.length;
+  const pool = candidates.filter((c) => !proven.some((p) => p.id === c.id) && !(c.lastTriedVisit && c.lastTriedVisit >= lastVisit));
+  const byId = new Map(pool.map((c) => [c.id, c]));
+  const rest = domainsToRest(profile.domainStats);
+
+  let discoveryNodes: TasteEntity[] = [];
+  let hypothesisNode: TasteEntity | undefined;
+  let hypothesisTests: string | undefined;
+
+  if (input.picks) {
+    discoveryNodes = input.picks.discoveryIds.map((id) => byId.get(id)).filter((n): n is TasteEntity => Boolean(n)).slice(0, 2);
+    const h = input.picks.hypothesisId ? byId.get(input.picks.hypothesisId) : undefined;
+    if (h && !discoveryNodes.some((d) => d.id === h.id)) {
+      hypothesisNode = h;
+      hypothesisTests = input.picks.hypothesisTests;
+    }
+  }
+
+  if (discoveryNodes.length === 0) {
+    // Rules: prefer domains that have worked, from seeds that have worked, in Qloo's own order.
+    const ranking = domainRanking(profile.domainStats);
+    const score = (c: TasteEntity) => {
+      const r = ranking.indexOf(c.domain);
+      return r === -1 ? ranking.length : r;
+    };
+    const sorted = [...pool].filter((c) => !rest.includes(c.domain)).sort((a, b) => score(a) - score(b));
+    discoveryNodes = sorted.slice(0, sorted.length >= 3 ? 2 : 1);
+  }
+
+  if (!hypothesisNode) {
+    const remaining = pool.filter((c) => !discoveryNodes.some((d) => d.id === c.id) && !rest.includes(c.domain));
+    const usedDomains = new Set([...proven, ...discoveryNodes].map((n) => n.domain));
+    hypothesisNode = remaining.find((c) => !usedDomains.has(c.domain)) || remaining[0];
+  }
+
+  const discoveries: KitSlotItem[] = discoveryNodes.map((n) => ({
+    ...n,
+    slotType: 'discovery',
+    confidence: 'Medium',
+    confidenceReason: n.sourceSeed ? `Qloo neighbour of ${shortName(n.sourceSeed)}, which has reached them` : 'Qloo neighbour'
+  }));
+
+  const hypothesis: KitSlotItem | undefined = hypothesisNode
+    ? {
+        ...hypothesisNode,
+        slotType: 'hypothesis',
+        confidence: 'Low',
+        confidenceReason: "This visit's experiment: untested",
+        hypothesisLabel:
+          hypothesisTests ||
+          `Testing: does ${name} respond to ${DOMAIN_LABEL[hypothesisNode.domain]} linked to ${
+            hypothesisNode.sourceSeed ? shortName(hypothesisNode.sourceSeed) : 'their favourites'
+          }?`
+      }
+    : undefined;
+
+  // 3. Why this kit: three reasons, each true of this kit.
+  const why: string[] = [];
+  if (proven.length) {
+    why.push(
+      `Starts on safe ground with ${proven.map((p) => shortName(p.name)).join(' and ')}${
+        visitNum === 1 ? ' (family favourites).' : ', which have reached them before.'
+      }`
+    );
+  }
+  const avoidCount = profile.avoidList.length + profile.tasteMapNodes.filter((n) => n.status === 'avoid').length;
+  if (avoidCount > 0) {
+    why.push(`Leaves out everything on the avoid list${rest.length ? ` and rests ${rest.map((d) => DOMAIN_LABEL[d]).join(', ')} after an upset` : ''}.`);
+  } else {
+    why.push(`Keeps new items within ${name}'s era (${profile.eraStart}–${profile.eraEnd}) wherever Qloo gives a year.`);
+  }
+  if (hypothesis) {
+    why.push(`Tries one new thing: ${shortName(hypothesis.name)}, found by Qloo from ${hypothesis.sourceSeed ? shortName(hypothesis.sourceSeed) : 'their favourites'}.`);
+  } else if (discoveries.length) {
+    why.push(`Adds ${shortName(discoveries[0].name)}, a Qloo discovery, as the only new item.`);
+  } else if (input.qlooStatus === 'not_connected') {
+    why.push("No new items yet: Qloo isn't connected, so the kit stays with the family's favourites.");
+  } else {
+    why.push('No new items this time: Qloo had nothing that passed the era and avoid-list checks.');
+  }
+
+  const writing = input.writing || {};
+  const conversationOpeners =
+    writing.openers && writing.openers.length === 3 ? writing.openers : defaultOpeners(name, proven, discoveries);
+
+  return {
+    id: `kit-${profile.id}-v${visitNum}-${Date.now()}`,
+    visitNumber: visitNum,
+    generatedAt: new Date().toISOString(),
+    whyThisKit: writing.why && writing.why.length === 3 ? writing.why : why.slice(0, 3),
+    provenFavourites: proven,
+    qlooDiscoveries: discoveries,
+    hypothesis,
+    sharedMoment: writing.sharedMoment || defaultSharedMoment(name, proven, profile.hobbies),
+    conversationOpeners,
+    stopCues: STOP_CUES,
+    agentTrace: input.trace,
+    planner: input.planner,
+    plannerModel: input.plannerModel,
+    qlooStatus: input.qlooStatus,
+    notices: input.notices
+  };
+}
+
+/** Pattern line built only from logged counts. Returns undefined until there is enough data. */
+export function describePattern(name: string, stats: DomainStats): string | undefined {
+  const domains = (Object.keys(stats) as Domain[]).filter((d) => tally(stats, d).tried >= 2);
+  if (domains.length === 0) return undefined;
+  const parts = domains
+    .map((d) => {
+      const t = tally(stats, d);
+      if (t.litUp === 0) return `${DOMAIN_LABEL[d]} haven't landed yet (0 of ${t.tried}${t.upset ? `, ${t.upset} upset` : ''})`;
+      return `${DOMAIN_LABEL[d]} reached ${name} in ${t.litUp} of ${t.tried} tries`;
+    })
+    .join('; ');
+  return `Pattern so far: ${parts}.`;
+}
+
 /**
- * Updates caregiver profile, colors taste map nodes, and records agent learning.
+ * Record one visit's reactions: recolour the map, update the avoid list and the per-domain
+ * tallies, and write item-level reflections. The next kit is planned separately by the agent.
  */
 export function recordVisitReactions(
   profile: CaregiverProfile,
   reactions: Record<string, ReactionType>,
   note?: string
 ): CaregiverProfile {
-  const visitNum = (profile.visitHistory.length || 0) + 1;
-  const updatedNodes = [...profile.tasteMapNodes];
-  const newAvoidList = [...profile.avoidList];
-  const itemReflections: string[] = [];
+  const visitNum = profile.visitHistory.length + 1;
+  const nodes = profile.tasteMapNodes.map((n) => ({ ...n }));
+  const avoidList = [...profile.avoidList];
+  const stats: DomainStats = JSON.parse(JSON.stringify(profile.domainStats || {}));
+  const itemLevel: string[] = [];
+  const reactedItems: VisitLog['reactedItems'] = {};
 
-  let litUpMusic = profile.domainStats.musicLitUpCount;
-  let litUpFilm = profile.domainStats.filmLitUpCount;
-  let litUpFood = profile.domainStats.foodLitUpCount;
-  let litUpPlace = profile.domainStats.placeLitUpCount;
-
-  // Process item-level reactions
-  for (const [entityId, reaction] of Object.entries(reactions)) {
-    const nodeIndex = updatedNodes.findIndex((n) => n.id === entityId);
-    const node = updatedNodes[nodeIndex];
-    const name = node ? node.name.split('—')[0].trim() : entityId;
+  for (const [id, reaction] of Object.entries(reactions)) {
+    const node = nodes.find((n) => n.id === id);
+    if (!node) continue;
+    const label = shortName(node.name);
+    reactedItems[id] = { name: label, domain: node.domain };
+    const t = { ...tally(stats, node.domain) };
+    t.tried += 1;
+    node.lastTriedVisit = visitNum;
 
     if (reaction === 'lit_up') {
-      if (nodeIndex !== -1) {
-        updatedNodes[nodeIndex] = {
-          ...updatedNodes[nodeIndex],
-          status: 'worked',
-          confidence: 'High',
-          confidenceReason: 'Lit up during visit'
-        };
-        if (node.domain === 'music') litUpMusic++;
-        if (node.domain === 'film') litUpFilm++;
-        if (node.domain === 'food') litUpFood++;
-        if (node.domain === 'place') litUpPlace++;
-      }
-      itemReflections.push(`This worked: ${name} (brought a smile and recognition).`);
+      t.litUp += 1;
+      node.status = 'worked';
+      node.confidence = 'High';
+      node.confidenceReason = `Lit up in visit ${visitNum}`;
+      node.lastLitUpVisit = visitNum;
+      itemLevel.push(`This worked: ${label}.`);
     } else if (reaction === 'upset') {
-      if (nodeIndex !== -1) {
-        updatedNodes[nodeIndex] = {
-          ...updatedNodes[nodeIndex],
-          status: 'avoid',
-          confidenceReason: 'Triggered distress — excluded permanently'
-        };
-      }
-      if (!newAvoidList.includes(name)) {
-        newAvoidList.push(name);
-      }
-      itemReflections.push(`Added to avoid list: ${name} (triggered distress, never suggested again).`);
+      t.upset += 1;
+      node.status = 'avoid';
+      node.confidenceReason = `Upset them in visit ${visitNum}; never suggested again`;
+      if (!avoidList.includes(label)) avoidList.push(label);
+      itemLevel.push(`Added to the avoid list: ${label}.`);
     } else {
-      itemReflections.push(`${name} fell flat (no reaction observed).`);
+      node.confidenceReason = `No reaction in visit ${visitNum}`;
+      itemLevel.push(`${label} fell flat this time.`);
     }
+    stats[node.domain] = t;
   }
 
-  // Pattern-level learning detection
-  let patternLevel: string | undefined;
-  if (litUpMusic + litUpPlace >= 4 && litUpFilm === 0) {
-    patternLevel = `Pattern emerging: ${profile.lovedOneName} responds deeply to vocal music and place-based memories, while video clips tend to cause distraction or distress.`;
-  } else if (litUpMusic >= 3) {
-    patternLevel = `I noticed something: Familiar voices and melodies consistently ground her visits into calm moments.`;
+  // Answer the experiment this kit set out to test, if it was tried.
+  const hyp = profile.currentKit?.hypothesis;
+  let experimentResult: string | undefined;
+  if (hyp && reactions[hyp.id]) {
+    const raw = (hyp.hypothesisLabel || `does ${profile.lovedOneName} respond to ${shortName(hyp.name)}?`).replace(/^Testing:\s*/i, '');
+    const label = raw.charAt(0).toUpperCase() + raw.slice(1);
+    const r = reactions[hyp.id];
+    experimentResult =
+      r === 'lit_up'
+        ? `Experiment: ${label} Yes, this time: ${shortName(hyp.name)} lit them up. It becomes a new starting point.`
+        : r === 'upset'
+        ? `Experiment: ${label} No: ${shortName(hyp.name)} upset them. It won't be suggested again.`
+        : `Experiment: ${label} Not this time: ${shortName(hyp.name)} fell flat. It rests for a visit.`;
   }
 
-  // Next-visit line synthesis
-  const litUpNames = Object.entries(reactions)
-    .filter(([_, r]) => r === 'lit_up')
-    .map(([id]) => {
-      const match = updatedNodes.find((n) => n.id === id);
-      return match ? match.name.split('—')[0].trim() : id;
-    });
-
-  const nextVisitLine = litUpNames.length > 0
-    ? `Next visit: start with ${litUpNames.join(' and ')}, keep topics peaceful, and try one new gentle place-sound experiment.`
-    : `Next visit: return to familiar church choir melodies and avoid fast media clips.`;
-
-  const visitLog: VisitLog = {
-    id: `log-visit-${visitNum}`,
+  const log: VisitLog = {
+    id: `log-${profile.id}-${visitNum}-${Date.now()}`,
     visitNumber: visitNum,
-    date: 'Just now',
+    date: new Date().toISOString(),
     reactions,
+    reactedItems,
     caregiverNote: note,
+    goodMoments: Object.values(reactions).filter((r) => r === 'lit_up').length,
     agentReflections: {
-      itemLevel: itemReflections,
-      patternLevel,
-      nextVisitLine
+      itemLevel,
+      patternLevel: describePattern(profile.lovedOneName, stats),
+      experimentResult,
+      nextVisitLine: '' // filled in once the next kit exists
     }
   };
 
-  const updatedProfile: CaregiverProfile = {
+  return {
     ...profile,
-    avoidList: newAvoidList,
-    tasteMapNodes: updatedNodes,
-    domainStats: {
-      musicLitUpCount: litUpMusic,
-      filmLitUpCount: litUpFilm,
-      foodLitUpCount: litUpFood,
-      placeLitUpCount: litUpPlace
-    },
-    visitHistory: [visitLog, ...profile.visitHistory]
+    tasteMapNodes: nodes,
+    avoidList,
+    domainStats: stats,
+    visitHistory: [log, ...profile.visitHistory],
+    previousKit: profile.currentKit ? { ...profile.currentKit, reactionsLogged: true } : undefined
   };
+}
 
-  // Generate the updated next kit immediately so judge sees before-and-after change!
-  const nextKit = generateNextVisitKit(updatedProfile, reactions);
-  updatedProfile.previousKit = profile.currentKit;
-  updatedProfile.currentKit = nextKit;
-
-  return updatedProfile;
+/** The plain-language next-visit line, built from the kit that was actually produced. */
+export function nextVisitLine(kit: VisitKit, newlyAvoided: string[]): string {
+  const start = kit.provenFavourites.map((p) => shortName(p.name));
+  const parts: string[] = [];
+  if (start.length) parts.push(`start with ${start.join(' and ')}`);
+  if (newlyAvoided.length) parts.push(`leave out ${newlyAvoided.join(' and ')}`);
+  if (kit.hypothesis) parts.push(`try one new thing: ${shortName(kit.hypothesis.name)}`);
+  else if (kit.qlooDiscoveries[0]) parts.push(`try ${shortName(kit.qlooDiscoveries[0].name)}`);
+  if (parts.length === 0) return 'Next visit: keep it simple and familiar.';
+  const sentence = parts.length > 1 ? `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}` : parts[0];
+  return `Next visit: ${sentence}.`;
 }

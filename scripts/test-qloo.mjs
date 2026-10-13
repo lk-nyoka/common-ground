@@ -1,175 +1,163 @@
 /**
- * Back Then — Day 1 Evaluation Harness: Qloo vs. LLM Alone
- * 
- * Tests the 4 global seed sets specified in the Final Plan:
- * 1. Dolly Parton, The Sound of Music, apple pie, the Lake District (Lead)
- * 2. Elvis Presley, Casablanca, spaghetti bolognese, Rome / Paris
- * 3. The Beatles, Mary Poppins, fish and chips, Blackpool
- * 4. ABBA, Grease, meatballs with lingonberry, Stockholm
- * 
- * Usage:
- *   $env:QLOO_API_KEY="your_api_key_here"  # Optional: runs live API if set
- *   npm run test:qloo
+ * Back Then: Qloo vs an LLM alone, on the same seeds.
+ *
+ * This script prints only what the APIs actually return. There is no pre-written
+ * verdict: read the two columns and judge for yourself, then quote real examples
+ * in the Devpost submission.
+ *
+ * Usage (PowerShell):
+ *   1. Put your keys in .env.local (see .env.example). Set QLOO_CAPTURE=true to also
+ *      save the Qloo responses locally as a demo backup.
+ *   2. In one terminal:   npm run dev
+ *   3. In another:        npm run test:qloo
+ *
+ * Output: results/comparison-<time>.md and .json (git-ignored: Qloo's terms say not to
+ * publish their response data in a public repo).
  */
+import { promises as fs } from 'fs';
+import path from 'path';
 
-import https from 'https';
+const APP_URL = process.env.APP_URL || 'http://localhost:3000';
 
-const API_KEY = process.env.QLOO_API_KEY;
-const BASE_URL = 'https://hackathon.api.qloo.com';
-
-function qlooGet(path) {
-  return new Promise((resolve, reject) => {
-    const url = new URL(path, BASE_URL);
-    const options = {
-      method: 'GET',
-      headers: {
-        'X-Api-Key': API_KEY,
-        'Accept': 'application/json',
-      },
-    };
-
-    const req = https.request(url, options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => (data += chunk));
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(data);
-          resolve({ status: res.statusCode, data: parsed });
-        } catch (e) {
-          resolve({ status: res.statusCode, raw: data });
-        }
-      });
-    });
-
-    req.on('error', (err) => reject(err));
-    req.end();
-  });
-}
-
-async function testEntitySearch(query, type) {
-  console.log(`\n🔍 Searching Qloo: "${query}" (type: ${type || 'all'})...`);
-  let path = `/search?query=${encodeURIComponent(query)}`;
-  if (type) path += `&types=${encodeURIComponent(type)}`;
-
-  const res = await qlooGet(path);
-  if (res.status !== 200) {
-    console.log(`   ⚠️ Failed (HTTP ${res.status}):`, JSON.stringify(res.data || res.raw));
-    return null;
+// The same seeds as the sample families. Add your own here.
+const CASES = [
+  {
+    label: 'Nomvula: born 1948, Soweto',
+    region: 'Soweto, Johannesburg, South Africa',
+    birthYear: 1948,
+    era: [1960, 1978],
+    seeds: [{ query: 'Miriam Makeba', type: 'urn:entity:artist' }]
+  },
+  {
+    label: 'Dorothy: born 1946, Ohio',
+    region: 'Ohio, USA',
+    birthYear: 1946,
+    era: [1958, 1976],
+    seeds: [
+      { query: 'Patsy Cline', type: 'urn:entity:artist' },
+      { query: 'The Sound of Music', type: 'urn:entity:movie' }
+    ]
   }
+];
 
-  const results = res.data?.results || res.data?.data || res.data || [];
-  const list = Array.isArray(results) ? results : (results.entities || []);
-  console.log(`   ✅ Found ${list.length} results.`);
-  if (list.length > 0) {
-    const top = list[0];
-    console.log(`   Top match: "${top.name || top.title || top.id}" [ID: ${top.id || top.entity_id}]`);
-    return {
-      id: top.id || top.entity_id,
-      name: top.name || top.title,
-      year: top.year || top.release_year || top.details?.year || null
-    };
-  }
-  return null;
-}
+const TARGETS = ['urn:entity:artist', 'urn:entity:movie'];
 
-async function testInsights(entityId, targetType, label) {
-  console.log(`   💡 Querying Insights [${targetType}] (${label})...`);
-  const path = `/v2/insights?filter.type=${encodeURIComponent(targetType)}&signal.interests.entities=${encodeURIComponent(entityId)}&take=4`;
-  
-  const res = await qlooGet(path);
-  if (res.status !== 200) {
-    console.log(`   ⚠️ Failed (HTTP ${res.status}):`, JSON.stringify(res.data || res.raw));
-    return [];
-  }
-
-  const entities = res.data?.entities || res.data?.results || [];
-  console.log(`   ✅ Received ${entities.length} recommendations:`);
-  const items = [];
-  for (const ent of entities.slice(0, 4)) {
-    const name = ent.name || ent.title || ent.id;
-    const year = ent.year || ent.release_year || '(no year)';
-    const score = ent.affinity || ent.score || ent.weight || '';
-    console.log(`      - ${name} [${year}] ${score ? `(score: ${score})` : ''}`);
-    items.push({ name, year, score });
-  }
-  return items;
-}
-
-function printComparisonAnalysis() {
-  console.log('\n======================================================================');
-  console.log('  PROOF: QLOO VS. AN LLM ALONE (DAY 1 EVALUATION MATRIX)');
-  console.log('  Required for Devpost submission text — 4 Concrete Distinctions');
-  console.log('======================================================================\n');
-
-  const comparisons = [
-    {
-      domain: '1. Seed: Dolly Parton (Born 1946, Cumbria & Yorkshire)',
-      llmAlone: 'Generic 1970s billboard country hits: Kenny Rogers, Willie Nelson, John Denver. (Decade popularity bias).',
-      withQloo: 'Acoustic vocal harmony cluster: Emmylou Harris & Linda Ronstadt (Trio), Patsy Cline Owen Bradley sound, Beatrix Potter countryside cottage links.',
-      devpostWin: 'Cultural Specificity: Identifies acoustic vocal sisterhood and regional country leisure rather than radio top-40.'
-    },
-    {
-      domain: '2. Seed: Elvis Presley & Casablanca (Born 1950, Rome)',
-      llmAlone: 'Superficial genre analogies: "If they like Elvis, play Chuck Berry; if they like Casablanca, play Citizen Kane."',
-      withQloo: 'High-affinity cross-domain cluster: Elvis ballad style -> Dean Martin ("On an Evening in Roma") -> Mina -> Piazza Navona evening strolls.',
-      devpostWin: 'Authentic Latent Affinity: Uncovers true cross-domain cultural lifestyle clusters linking cinema to Italian vocal romance.'
-    },
-    {
-      domain: '3. Seed: The Beatles & Blackpool (Born 1952, Blackpool & Boston)',
-      llmAlone: 'Decade rock: Rolling Stones, The Who, Led Zeppelin (Ignores gentle seaside nostalgia).',
-      withQloo: 'Merseybeat community cluster: Gerry and the Pacemakers ("Ferry Cross the Mersey") -> Mary Poppins family sing-alongs -> Blackpool promenade tram memory.',
-      devpostWin: 'Caregiver Trust & Safety: Links the family’s real holiday memories without drifting into jarring hard rock.'
-    },
-    {
-      domain: '4. Seed: ABBA & Stockholm (Born 1955, Sweden)',
-      llmAlone: 'Generic disco: Bee Gees, Boney M, Donna Summer.',
-      withQloo: 'Nordic pop affinity: Ted Gärdestad (produced by Björn & Benny) -> Olivia Newton-John -> Stockholm Archipelago summer berry picking.',
-      devpostWin: 'Closed-Loop Care Logic: Lit-up items feed directly back as new seeds, while distress items permanently update the avoid list.'
+async function loadEnvLocal() {
+  for (const f of ['.env.local', '.env']) {
+    try {
+      const text = await fs.readFile(path.join(process.cwd(), f), 'utf8');
+      for (const line of text.split(/\r?\n/)) {
+        const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+        if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+      }
+    } catch {
+      /* file not present */
     }
-  ];
-
-  for (const c of comparisons) {
-    console.log(`📌 ${c.domain}`);
-    console.log(`   [LLM Alone]:  ${c.llmAlone}`);
-    console.log(`   [With Qloo]:  ${c.withQloo}`);
-    console.log(`   🏆 Judge Win:  ${c.devpostWin}\n`);
   }
 }
 
-async function run() {
-  console.log('======================================================================');
-  console.log('  Back Then — Day 1 Qloo API & Baseline Validation');
-  console.log('======================================================================');
-
-  if (!API_KEY) {
-    console.log('\n⚠️  QLOO_API_KEY is not set in this environment.');
-    console.log('Offline deterministic mode enabled.');
-    console.log('To run live queries against https://hackathon.api.qloo.com, execute:');
-    console.log('   $env:QLOO_API_KEY="your_api_key_here"');
-    console.log('   npm run test:qloo\n');
-    console.log('Displaying the baseline comparison analysis matrix below:\n');
-    printComparisonAnalysis();
-    return;
-  }
-
-  console.log(`\n🔑 API Key detected. Testing live queries against ${BASE_URL}...`);
-
-  // 1. Profile 1: Margaret (Dolly Parton / Lake District)
-  console.log('\n--- PROFILE 1: Margaret (Dolly Parton / Lake District) ---');
-  const dolly = await testEntitySearch('Dolly Parton', 'urn:entity:artist');
-  if (dolly?.id) {
-    await testInsights(dolly.id, 'urn:entity:artist', 'Artists culturally linked to Dolly Parton');
-    await testInsights(dolly.id, 'urn:entity:movie', 'Films culturally linked to Dolly Parton');
-  }
-
-  // 2. Profile 2: Elvis Presley
-  console.log('\n--- PROFILE 2: Elvis Presley ---');
-  const elvis = await testEntitySearch('Elvis Presley', 'urn:entity:artist');
-  if (elvis?.id) {
-    await testInsights(elvis.id, 'urn:entity:artist', 'Artists culturally linked to Elvis Presley');
-  }
-
-  printComparisonAnalysis();
+async function getJson(url) {
+  const res = await fetch(url);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`${url} -> HTTP ${res.status} ${JSON.stringify(data).slice(0, 200)}`);
+  return data;
 }
 
-run().catch(console.error);
+async function qlooSide(c) {
+  const out = [];
+  for (const s of c.seeds) {
+    const search = await getJson(`${APP_URL}/api/qloo/search?${new URLSearchParams({ query: s.query, type: s.type })}`);
+    const match = (search.results || [])[0];
+    const entry = { seed: s.query, source: search.source, error: search.error, matched: match || null, related: {} };
+    if (match) {
+      for (const t of TARGETS) {
+        const r = await getJson(
+          `${APP_URL}/api/qloo/insights?${new URLSearchParams({ entityId: match.id, filterType: t, maxYear: String(c.era[1]) })}`
+        );
+        entry.related[t] = { source: r.source, error: r.error, items: (r.results || []).map((e) => ({ name: e.name, year: e.year ?? null })) };
+      }
+    }
+    out.push(entry);
+  }
+  return out;
+}
+
+async function llmSide(c) {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return { skipped: 'GEMINI_API_KEY not set, so there is no LLM-alone column.' };
+  const model = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
+  const prompt = `Someone born in ${c.birthYear} grew up in ${c.region}. Their family says they loved: ${c.seeds
+    .map((s) => s.query)
+    .join(', ')}. Without any other data, list 8 musical artists and 5 films they would most likely connect with from roughly ${c.era[0]} to ${c.era[1]}. Reply with JSON only: {"artists": ["..."], "films": [{"title": "...", "year": 1965}]}`;
+  const res = await fetch(`${process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com'}/v1beta/models/${model}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { temperature: 0.4, responseMimeType: 'application/json' } })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { error: `Gemini HTTP ${res.status}: ${JSON.stringify(data).slice(0, 300)}` };
+  const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '';
+  try {
+    return { model, prompt, ...JSON.parse(text) };
+  } catch {
+    return { model, prompt, raw: text };
+  }
+}
+
+function md(results) {
+  const lines = [`# Qloo vs an LLM alone`, ``, `Run at ${new Date().toISOString()}. Raw API output, no edits.`, ``];
+  for (const r of results) {
+    lines.push(`## ${r.case.label} (era ${r.case.era[0]}–${r.case.era[1]})`, ``);
+    lines.push(`### With Qloo`);
+    for (const q of r.qloo) {
+      lines.push(`- **${q.seed}** → ${q.matched ? `matched "${q.matched.name}" [${q.source}]` : `no match [${q.source}${q.error ? `: ${q.error}` : ''}]`}`);
+      for (const [t, rel] of Object.entries(q.related)) {
+        const items = rel.items.map((i) => `${i.name}${i.year ? ` (${i.year})` : ''}`).join(', ') || 'none';
+        lines.push(`  - ${t.replace('urn:entity:', '')} [${rel.source}]: ${items}`);
+      }
+    }
+    lines.push(``, `### LLM alone`);
+    if (r.llm.skipped || r.llm.error) lines.push(`- ${r.llm.skipped || r.llm.error}`);
+    else if (r.llm.raw) lines.push('```', r.llm.raw, '```');
+    else {
+      lines.push(`- Model: ${r.llm.model}`);
+      lines.push(`- Artists: ${(r.llm.artists || []).join(', ')}`);
+      lines.push(`- Films: ${(r.llm.films || []).map((f) => (typeof f === 'string' ? f : `${f.title}${f.year ? ` (${f.year})` : ''}`)).join(', ')}`);
+    }
+    lines.push(``);
+  }
+  lines.push(`## Your notes`, ``, `Where does Qloo find something specific to these favourites that the LLM missed? Where is the LLM just as good? Write 3–4 honest examples here for the submission.`, ``);
+  return lines.join('\n');
+}
+
+async function main() {
+  await loadEnvLocal();
+  try {
+    const status = await getJson(`${APP_URL}/api/status`);
+    console.log(`App at ${APP_URL}: Qloo key ${status.qloo.keySet ? 'set' : 'NOT set'}, ${status.qloo.savedResponses} saved responses, LLM ${status.llm.configured ? status.llm.model : 'not set'}.`);
+    if (!status.qloo.keySet) console.log('Without a Qloo key the Qloo column can only use saved responses (or will be empty).');
+  } catch {
+    console.error(`Can't reach the app at ${APP_URL}. Start it first with "npm run dev" in another terminal.`);
+    process.exit(1);
+  }
+
+  const results = [];
+  for (const c of CASES) {
+    console.log(`\nRunning: ${c.label}`);
+    results.push({ case: c, qloo: await qlooSide(c), llm: await llmSide(c) });
+  }
+
+  const dir = path.join(process.cwd(), 'results');
+  await fs.mkdir(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const report = md(results);
+  await fs.writeFile(path.join(dir, `comparison-${stamp}.md`), report, 'utf8');
+  await fs.writeFile(path.join(dir, `comparison-${stamp}.json`), JSON.stringify(results, null, 2), 'utf8');
+  console.log('\n' + report);
+  console.log(`Saved to results/comparison-${stamp}.md (git-ignored).`);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

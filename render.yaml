@@ -1,0 +1,19 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# Free web service. Add QLOO_API_KEY and GEMINI_API_KEY in the Render dashboard (never in this file).
+services:
+  - type: web
+    name: common-ground
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/status
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash
+      - key: QLOO_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false

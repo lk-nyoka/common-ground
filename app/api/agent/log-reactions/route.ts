@@ -1,23 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CaregiverProfile, ReactionType } from '../../../../lib/types';
-import { recordVisitReactions } from '../../../../lib/care-logic';
+import { nextVisitLine, recordVisitReactions } from '../../../../lib/care-logic';
+import { planVisit } from '../../../../lib/agent';
 
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
+/** Record a visit's reactions, then let the agent plan the next kit from what it learned. */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { profile, reactions, note } = body as {
+    const { profile, reactions, note } = (await request.json()) as {
       profile: CaregiverProfile;
       reactions: Record<string, ReactionType>;
       note?: string;
     };
-
-    if (!profile || !reactions) {
-      return NextResponse.json({ error: 'Profile and reactions are required' }, { status: 400 });
+    if (!profile || !reactions || Object.keys(reactions).length === 0) {
+      return NextResponse.json({ error: 'A profile and at least one reaction are required' }, { status: 400 });
     }
 
-    const updatedProfile = recordVisitReactions(profile, reactions, note);
-    return NextResponse.json({ profile: updatedProfile });
+    const logged = recordVisitReactions(profile, reactions, note);
+    const { profile: planned, kit } = await planVisit(logged);
+
+    const log = planned.visitHistory[0];
+    const newlyAvoided = Object.entries(reactions)
+      .filter(([, r]) => r === 'upset')
+      .map(([id]) => log.reactedItems?.[id]?.name)
+      .filter((n): n is string => Boolean(n));
+    log.agentReflections.nextVisitLine = nextVisitLine(kit, newlyAvoided);
+
+    return NextResponse.json({ profile: planned });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Reaction logging failed' }, { status: 500 });
+    console.error('log-reactions failed', error);
+    return NextResponse.json({ error: error?.message || 'Reaction logging failed' }, { status: 500 });
   }
 }

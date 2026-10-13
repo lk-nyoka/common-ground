@@ -1,17 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CaregiverProfile } from '../../../../lib/types';
-import { generateNextVisitKit } from '../../../../lib/care-logic';
+import { planVisit } from '../../../../lib/agent';
 
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
+/** Plan a visit kit for a profile. The agent calls Qloo (and the LLM, if configured). */
 export async function POST(request: NextRequest) {
   try {
-    const profile: CaregiverProfile = await request.json();
-    if (!profile || !profile.lovedOneName) {
-      return NextResponse.json({ error: 'Valid profile payload required' }, { status: 400 });
+    const body = await request.json();
+    const profile: CaregiverProfile = body?.profile ?? body;
+    if (!profile || !profile.lovedOneName || !Array.isArray(profile.tasteMapNodes)) {
+      return NextResponse.json({ error: 'A profile is required' }, { status: 400 });
     }
-
-    const kit = generateNextVisitKit(profile);
-    return NextResponse.json({ kit });
+    const { profile: updated } = await planVisit(profile);
+    return NextResponse.json({ profile: updated });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Kit generation failed' }, { status: 500 });
+    console.error('generate-kit failed', error);
+    return NextResponse.json({ error: error?.message || 'Kit generation failed' }, { status: 500 });
   }
 }
