@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { CaregiverProfile, ReactionType } from '../../../../lib/types';
 import { nextVisitLine, recordVisitReactions } from '../../../../lib/care-logic';
 import { planVisit } from '../../../../lib/agent';
+import { guarded } from '../../../../lib/server/http';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 /** Record a visit's reactions, then let the agent plan the next kit from what it learned. */
-export async function POST(request: NextRequest) {
+async function handle(request: NextRequest) {
   try {
     const { profile, reactions, note } = (await request.json()) as {
       profile: CaregiverProfile;
@@ -31,6 +32,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ profile: planned });
   } catch (error: any) {
     console.error('log-reactions failed', error);
-    return NextResponse.json({ error: error?.message || 'Reaction logging failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Reaction logging failed' }, { status: 500 });
   }
+}
+
+export async function POST(request: NextRequest) {
+  return guarded(request, 'gentle_reactions', () => handle(request));
 }

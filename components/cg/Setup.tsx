@@ -86,11 +86,21 @@ function PersonCard({ who, draft, onChange, tone }: { who: 'a' | 'b'; draft: Dra
   );
 }
 
-export function Setup({ onStart, busy }: { onStart: (s: Session) => void; busy: boolean }) {
-  const [a, setA] = useState<Draft>(emptyDraft);
-  const [b, setB] = useState<Draft>(emptyDraft);
-  const [minutes, setMinutes] = useState(120);
-  const [avoid, setAvoid] = useState('');
+const fromPerson = (p?: Person): Draft => {
+  if (!p) return emptyDraft();
+  return {
+    name: ['You', 'Them'].includes(p.name) ? '' : p.name,
+    favs: p.favourites.length ? p.favourites.map((f) => ({ query: f.query, type: f.type })) : emptyDraft().favs
+  };
+};
+
+/** `initial` refills the form after a failed first plan, so nothing typed is lost. */
+export function Setup({ onStart, busy, initial }: { onStart: (s: Session) => void; busy: boolean; initial?: Session | null }) {
+  const keep = initial && !initial.isSample ? initial : null;
+  const [a, setA] = useState<Draft>(() => fromPerson(keep?.people[0]));
+  const [b, setB] = useState<Draft>(() => fromPerson(keep?.people[1]));
+  const [minutes, setMinutes] = useState(keep?.minutes || 120);
+  const [avoid, setAvoid] = useState(keep?.exclusions.join(', ') || '');
 
   const toPerson = (id: 'a' | 'b', d: Draft): Person =>
     person(id, d.name.trim() || (id === 'a' ? 'You' : 'Them'), d.favs.filter((f) => f.query.trim()).map((f) => fav(f.query.trim(), f.type)));

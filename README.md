@@ -23,10 +23,11 @@ Built for the [Qloo Agentic Hackathon](https://qloo.devpost.com/) (“Agents, bu
 11. [Setup](#11-setup)
 12. [Configuration](#12-configuration)
 13. [Deploying (Render or Vercel)](#13-deploying-render-or-vercel)
-14. [API reference](#14-api-reference)
-15. [Project structure](#15-project-structure)
-16. [Known limitations](#16-known-limitations)
-17. [Licence](#17-licence)
+14. [Running in production](#14-running-in-production)
+15. [API reference](#15-api-reference)
+16. [Project structure](#16-project-structure)
+17. [Known limitations](#17-known-limitations)
+18. [Licence](#18-licence)
 
 ---
 
@@ -191,6 +192,9 @@ Both keys are optional. Without them the app still runs and says what’s missin
 | `GEMINI_API_KEY` | For agent mode | none | Without it, the app uses rules mode. |
 | `GEMINI_MODEL` | No | `gemini-3.5-flash` | The first model tried. Flash-Lite models are the fallback. |
 | `GEMINI_BASE_URL` | No | Google’s API | Only for testing against a mock. |
+| `PLAN_RATE_LIMIT` | No | `20` | Plans per visitor per 10 minutes. |
+| `NEXT_PUBLIC_SITE_URL` | No | Render’s URL | Public URL used in link previews. |
+| `KEEP_AWAKE` | No | on (Render only) | `false` stops the self-ping on Render. |
 
 **Timeouts:**
 - Each Qloo call times out after 8 s.
@@ -222,7 +226,36 @@ Free Render services go to sleep after about 15 minutes without visits, and waki
 2. Under **Environment Variables**, add `QLOO_API_KEY`, `GEMINI_API_KEY` and `GEMINI_MODEL`. Don't set `QLOO_CAPTURE`.
 3. Deploy, then try a sample pair on your phone.
 
-## 14. API reference
+## 14. Running in production
+
+| Area | What the app does |
+| --- | --- |
+| **Input** | The browser holds the session, so the server treats it as untrusted. It keeps only known fields, trims text, caps every list (3 favourites, 5 exclusions, 4 stored plans and so on), and only passes id-shaped Qloo ids on to Qloo. Request bodies are capped at 400 KB. |
+| **Abuse** | Each visitor can make 20 plans per 10 minutes (`PLAN_RATE_LIMIT` changes this), which protects the Qloo and Gemini quotas. The raw Qloo helper routes have their own, higher limit. |
+| **Errors** | Bad input gets a plain 400 message. Unexpected errors get a generic 500 and are logged without internals going to the browser. The page has its own error and 404 screens, and the browser gives up on a request after 75 s with a clear message. A failed first plan keeps whatever the person typed. |
+| **Speed** | Live Qloo responses are cached for 6 hours. A Gemini model that is busy, rate-limited or times out is skipped for 3 minutes (a retired one for an hour), and a model that isn't the last option gets 9 s before the next is tried. |
+| **Headers** | In production: a Content Security Policy, HSTS, `X-Frame-Options: DENY`, `nosniff`, a strict referrer policy and a locked-down permissions policy. API responses are `no-store`. |
+| **Logs** | One JSON line per plan: time taken, plan number, planner, model, Qloo status and pick count. No names or favourites are logged. |
+| **Sharing** | Open Graph and Twitter metadata with a generated preview image, so a shared link shows a card. Set `NEXT_PUBLIC_SITE_URL` to your public URL (`render.yaml` does this). |
+| **Staying awake** | On Render, the server pings itself every 10 minutes (see above). |
+
+### Tests
+
+```bash
+npm test         # planner, validation and learning, with Qloo and Gemini mocked (no keys needed)
+npm run typecheck
+```
+
+The tests check that:
+- every pick is a Qloo result, labelled as such;
+- exclusions are applied using Qloo's tags;
+- a shared tag counts as confirmed only when both people's favourites carry it;
+- names never reach Qloo or the model;
+- invented model picks are dropped;
+- a model failure falls back to rules, and a Qloo outage produces no invented plan;
+- feedback adds the right signals and rejected items never return.
+
+## 15. API reference
 
 | Method and path | Body | Returns |
 | --- | --- | --- |
@@ -231,7 +264,7 @@ Free Render services go to sleep after about 15 minutes without visits, and waki
 | `GET /api/status` | none | `{ qloo: { keySet, savedResponses }, llm: { configured, model } }`. Never returns the keys. |
 | `POST /api/agent/*`, `GET /api/qloo/*` | | Routes for Gentle visit mode, and raw Qloo helpers |
 
-## 15. Project structure
+## 16. Project structure
 
 ```
 app/
@@ -244,10 +277,14 @@ lib/cg/agent.ts           The planning agent
 lib/cg/learn.ts           Feedback, signals, shared hit rate
 lib/cg/types.ts, samples.ts
 lib/qloo-client.ts        Qloo search, insights, compare; cache, rate limiting, saved responses
-lib/llm.ts                Gemini with function calling and model fallback
+lib/llm.ts                Gemini with function calling, model fallback and cooldown
+lib/cg/validate.ts        Server-side input checks and size limits
+lib/server/http.ts        Rate limiting, safe errors, plan logs
+instrumentation.ts        Keeps the free Render service awake
+tests/cg.test.ts          npm test
 ```
 
-## 16. Known limitations
+## 17. Known limitations
 
 - It plans for two people, at home, only. Groups and going out are not built.
 - Favourites can be artists, films or TV shows. Qloo also supports books, podcasts and more, but we kept to the domains where results tested well.
@@ -255,6 +292,6 @@ lib/llm.ts                Gemini with function calling and model fallback
 - Qloo’s hackathon API is rate-limited, so at busy times a plan can take 20–30 seconds.
 - Free Gemini models are sometimes overloaded. When that happens, the plan says it was picked by rules from the same Qloo results.
 
-## 17. Licence
+## 18. Licence
 
 MIT. See [LICENSE](LICENSE).

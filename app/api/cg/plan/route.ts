@@ -1,20 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { planNight } from '../../../../lib/cg/agent';
-import type { Session } from '../../../../lib/cg/types';
+import { picksOf } from '../../../../lib/cg/learn';
+import { cleanSession, LIMITS, trimForClient } from '../../../../lib/cg/validate';
+import { guarded, logPlan, readJson } from '../../../../lib/server/http';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 /** Plan tonight for two people. Calls Qloo (and the LLM agent, if configured). */
 export async function POST(request: NextRequest) {
-  try {
-    const { session } = (await request.json()) as { session: Session };
-    if (!session || !Array.isArray(session.people) || session.people.length !== 2) {
-      return NextResponse.json({ error: 'Two people are needed' }, { status: 400 });
-    }
-    return NextResponse.json({ session: await planNight(session) });
-  } catch (error: any) {
-    console.error('cg plan failed', error);
-    return NextResponse.json({ error: error?.message || 'Planning failed' }, { status: 500 });
-  }
+  return guarded(request, 'plan', async () => {
+    const started = Date.now();
+    const body = (await readJson(request, LIMITS.bodyBytes)) as { session?: unknown };
+    const session = await planNight(cleanSession(body?.session));
+    logPlan('plan', started, session.plans[0], session.plans[0] ? picksOf(session.plans[0]).length : 0);
+    return NextResponse.json({ session: trimForClient(session) });
+  });
 }

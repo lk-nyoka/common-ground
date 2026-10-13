@@ -27,6 +27,11 @@ const TIMEOUT_MS = 8000;
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const cache = new Map<string, { raw: unknown; at: number }>();
 
+/** For tests only: forget cached responses. */
+export function clearQlooCache() {
+  cache.clear();
+}
+
 /**
  * Qloo rate-limits the hackathon key, so live calls go through a small limiter
  * (at most 2 at a time) and are retried on HTTP 429 with backoff.

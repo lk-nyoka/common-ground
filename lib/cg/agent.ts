@@ -11,7 +11,7 @@
  */
 import type { AgentTraceStep, QlooEntity, QlooStatus } from '../types';
 import { qlooCompare, qlooKeyIsSet, qlooRelated, qlooSearch, savedFixtureCount } from '../qloo-client';
-import { extractJson, FunctionDeclaration, GeminiContent, GeminiPart, geminiGenerate, llmIsConfigured, llmModel } from '../llm';
+import { extractJson, FunctionDeclaration, GeminiContent, GeminiPart, geminiGenerate, llmIsConfigured, modelOf } from '../llm';
 import type { Favourite, Person, PersonId, Pick, PickKind, Plan, Session, SharedTag } from './types';
 
 type Source = 'live' | 'saved' | 'unavailable';
@@ -205,6 +205,7 @@ interface Choice {
   why?: string[];
   tonight?: string;
   reasons: Record<string, string>;
+  model?: string; // the Gemini model that wrote the final plan
 }
 
 /** Joint artists ordered so neither person's taste drowns out the other's:
@@ -303,10 +304,12 @@ ${list(pools.bWorld)}`;
   const contents: GeminiContent[] = [{ role: 'user', parts: [{ text: brief }] }];
   const known = new Set([...signalsOf(A), ...signalsOf(B), ...[...pools.movies, ...pools.tv, ...pools.artists, ...pools.aWorld, ...pools.bWorld].map((e) => e.id)]);
   let text = '';
+  let usedModel: string | undefined;
   for (let turn = 0; turn < 4; turn++) {
     const remaining = run.deadline - Date.now();
     if (remaining < 8000) break;
     const reply = await geminiGenerate({ system: SYSTEM, contents, tools: TOOLS, allowTools: run.extraCalls < MAX_EXTRA_TOOL_CALLS && remaining > 15000, timeoutMs: Math.min(20000, remaining - 3000) });
+    usedModel = modelOf(reply) || usedModel;
     contents.push(reply);
     const calls = reply.parts.filter((p) => p.functionCall);
     text = reply.parts.map((p) => p.text || '').join('').trim();
@@ -338,6 +341,7 @@ ${list(pools.bWorld)}`;
   if (!plan) {
     contents.push({ role: 'user', parts: [{ text: 'Reply now with the JSON object only.' }] });
     const reply = await geminiGenerate({ system: SYSTEM, contents, tools: TOOLS, allowTools: false, timeoutMs: 15000 });
+    usedModel = modelOf(reply) || usedModel;
     plan = extractJson(reply.parts.map((p) => p.text || '').join(''));
   }
   if (!plan) throw new Error('the model did not return a JSON plan');
@@ -352,7 +356,8 @@ ${list(pools.bWorld)}`;
     forBId: inPool(plan.for_b_id, pools.aWorld),
     why: Array.isArray(plan.why) ? plan.why.map(String).slice(0, 3) : undefined,
     tonight: typeof plan.tonight === 'string' ? plan.tonight : undefined,
-    reasons: plan.reasons && typeof plan.reasons === 'object' ? Object.fromEntries(Object.entries(plan.reasons).map(([k, v]) => [k, String(v)])) : {}
+    reasons: plan.reasons && typeof plan.reasons === 'object' ? Object.fromEntries(Object.entries(plan.reasons).map(([k, v]) => [k, String(v)])) : {},
+    model: usedModel
   };
   const asked = [plan.watch_id, ...(plan.also_ids || []), ...(plan.listen_ids || []), plan.for_a_id, plan.for_b_id].filter(Boolean).length;
   const valid = [choice.watchId, ...choice.alsoIds, ...choice.listenIds, choice.forAId, choice.forBId].filter(Boolean).length;
@@ -469,7 +474,7 @@ export async function planNight(input: Session): Promise<Session> {
     : 'Not enough to plan tonight. Add another favourite each and try again.';
 
   const picks = [watch, ...alsoWatch, ...listen, forA, forB].filter(Boolean) as Pick[];
-  run.add('synthesis', planner === 'llm' ? `Plan chosen by ${llmModel()}` : 'Plan chosen by rules', picks.length ? picks.map((p) => `${p.name} (${p.kind})`).join(', ') : 'No picks.');
+  run.add('synthesis', planner === 'llm' ? `Plan chosen by ${choice.model || 'the AI planner'}` : 'Plan chosen by rules', picks.length ? picks.map((p) => `${p.name} (${p.kind})`).join(', ') : 'No picks.');
 
   const plan: Plan = {
     id: `plan-${Date.now()}`,
@@ -485,7 +490,7 @@ export async function planNight(input: Session): Promise<Session> {
     tonight,
     trace: run.trace,
     planner,
-    plannerModel: planner === 'llm' ? llmModel() : undefined,
+    plannerModel: planner === 'llm' ? choice.model : undefined,
     qlooStatus: status,
     notices
   };

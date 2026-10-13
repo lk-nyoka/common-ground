@@ -37,3 +37,6 @@ next-env.d.ts
 /data/qloo-fixtures/*.json
 # Comparison script output (contains Qloo response data)
 /results/
+
+# compiled tests
+/.test-build/

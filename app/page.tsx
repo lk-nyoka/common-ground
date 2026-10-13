@@ -44,15 +44,24 @@ export default function Home() {
   const call = async (url: string, body: unknown) => {
     setBusy(true);
     setError(null);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 75_000);
     try {
-      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.session) throw new Error(data.error || `The planner answered HTTP ${res.status}.`);
+      if (!res.ok || !data.session) throw new Error(data.error || 'The planner had a problem. Please try again.');
       setSession(data.session);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {
-      setError(String(err?.message || err));
+      setError(
+        err?.name === 'AbortError'
+          ? 'That took too long. Qloo or the AI planner may be busy. Please try again.'
+          : typeof navigator !== 'undefined' && !navigator.onLine
+          ? 'You seem to be offline. Check your connection and try again.'
+          : String(err?.message || err)
+      );
     } finally {
+      clearTimeout(timer);
       setBusy(false);
     }
   };
@@ -92,10 +101,10 @@ export default function Home() {
 
       <div className="mx-auto max-w-3xl px-4 pb-16 sm:px-6">
         {error && (
-          <div className="mb-4 rounded-xl border border-accent/30 bg-accent/5 px-4 py-3 text-sm">
+          <div role="alert" className="mb-4 rounded-xl border border-accent/30 bg-accent/5 px-4 py-3 text-sm">
             {error}{' '}
-            {session && (
-              <button type="button" className="underline" onClick={() => call(hasPlan ? '/api/cg/plan' : '/api/cg/plan', { session })}>
+            {session && !busy && (
+              <button type="button" className="underline" onClick={() => call('/api/cg/plan', { session })}>
                 Try again
               </button>
             )}
@@ -114,7 +123,7 @@ export default function Home() {
         ) : hasPlan && session ? (
           <PlanView key={session.plans[0].id} session={session} busy={busy} onFeedback={feedback} onReset={() => setSession(null)} />
         ) : (
-          <Setup onStart={start} busy={busy} />
+          <Setup onStart={start} busy={busy} initial={session} />
         )}
 
         <footer className="mt-16 border-t border-line pt-6 text-center text-xs text-muted">

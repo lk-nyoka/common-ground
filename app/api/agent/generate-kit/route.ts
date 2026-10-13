@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CaregiverProfile } from '../../../../lib/types';
 import { planVisit } from '../../../../lib/agent';
+import { guarded } from '../../../../lib/server/http';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 /** Plan a visit kit for a profile. The agent calls Qloo (and the LLM, if configured). */
-export async function POST(request: NextRequest) {
+async function handle(request: NextRequest) {
   try {
     const body = await request.json();
     const profile: CaregiverProfile = body?.profile ?? body;
@@ -17,6 +18,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ profile: updated });
   } catch (error: any) {
     console.error('generate-kit failed', error);
-    return NextResponse.json({ error: error?.message || 'Kit generation failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Kit generation failed' }, { status: 500 });
   }
+}
+
+export async function POST(request: NextRequest) {
+  return guarded(request, 'gentle_kit', () => handle(request));
 }

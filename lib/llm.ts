@@ -10,13 +10,32 @@ const FALLBACK_MODELS = ['gemini-flash-lite-latest', 'gemini-3.5-flash-lite', 'g
 
 let lastWorking: string | undefined;
 
+/** Models that just failed are skipped for a while, so one overloaded model doesn't slow every plan. */
+const coolingUntil = new Map<string, number>();
+const COOL_BUSY_MS = 3 * 60 * 1000; // 503, 429, 500 or a timeout
+const COOL_GONE_MS = 60 * 60 * 1000; // 404: retired or unknown
+/** A model that isn't the last option gets at most this long before the next one is tried. */
+const FIRST_TRY_MS = 9000;
+
+function cool(model: string, ms: number) {
+  coolingUntil.set(model, Date.now() + ms);
+}
+
 export function llmIsConfigured(): boolean {
   return Boolean(process.env.GEMINI_API_KEY);
 }
 
 function modelChain(): string[] {
   const first = process.env.GEMINI_MODEL || DEFAULT_MODEL;
-  return Array.from(new Set([lastWorking, first, DEFAULT_MODEL, ...FALLBACK_MODELS].filter(Boolean) as string[]));
+  const all = Array.from(new Set([lastWorking, first, DEFAULT_MODEL, ...FALLBACK_MODELS].filter(Boolean) as string[]));
+  const now = Date.now();
+  const ready = all.filter((m) => (coolingUntil.get(m) || 0) <= now);
+  return ready.length ? ready : all;
+}
+
+/** The model that produced a reply from geminiGenerate. */
+export function modelOf(reply: GeminiContent): string | undefined {
+  return (reply as GeminiContent & { model?: string }).model;
 }
 
 /** The model that answered most recently (or the configured one). */
@@ -74,8 +93,8 @@ export async function geminiGenerate(opts: {
     const model = chain[i];
     const remaining = deadline - Date.now();
     if (remaining < 1500) break;
-    // Leave time for a fallback model: a busy model gets at most 60% of what is left.
-    const budget = i === chain.length - 1 ? remaining : Math.min(remaining, Math.max(4000, Math.round(remaining * 0.6)));
+    // Leave time for a fallback model: a model that isn't the last option gets a short first try.
+    const budget = i === chain.length - 1 ? remaining : Math.min(remaining, FIRST_TRY_MS);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), budget);
     try {
@@ -89,6 +108,7 @@ export async function geminiGenerate(opts: {
         const text = await res.text().catch(() => '');
         const msg = `${model}: HTTP ${res.status}${text ? ` ${text.replace(/\s+/g, ' ').slice(0, 120)}` : ''}`;
         if ([404, 429, 500, 503].includes(res.status)) {
+          cool(model, res.status === 404 ? COOL_GONE_MS : COOL_BUSY_MS);
           errors.push(msg);
           continue; // try the next model
         }
@@ -100,9 +120,14 @@ export async function geminiGenerate(opts: {
         throw new Error(`${model} returned no content (finishReason: ${json?.candidates?.[0]?.finishReason || 'unknown'})`);
       }
       lastWorking = model;
-      return { role: 'model', parts: content.parts };
+      coolingUntil.delete(model);
+      const reply: GeminiContent = { role: 'model', parts: content.parts };
+      // Not enumerable, so it is never sent back to Gemini with the conversation.
+      Object.defineProperty(reply, 'model', { value: model, enumerable: false });
+      return reply;
     } catch (err: any) {
       if (err?.name === 'AbortError') {
+        cool(model, COOL_BUSY_MS);
         errors.push(`${model}: timed out`);
         continue;
       }

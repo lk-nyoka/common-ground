@@ -13,6 +13,8 @@ services:
         value: "20"
       - key: GEMINI_MODEL
         value: gemini-3.5-flash
+      - key: NEXT_PUBLIC_SITE_URL
+        value: https://common-ground-pho7.onrender.com
       - key: QLOO_API_KEY
         sync: false
       - key: GEMINI_API_KEY
