@@ -214,7 +214,7 @@ The repo includes `render.yaml`.
 2. When asked, enter `QLOO_API_KEY` and `GEMINI_API_KEY`. `GEMINI_MODEL` is already set. Don't set `QLOO_CAPTURE`.
 3. Deploy, then try a sample pair on your phone. `/api/status` is the health check.
 
-Free Render services go to sleep after about 15 minutes without visits, and the first visit after that takes up to a minute to wake. Open the app a few minutes before a demo or judging.
+Free Render services go to sleep after about 15 minutes without visits, and waking one takes up to a minute. To avoid that, `instrumentation.ts` makes the server visit its own public address (`RENDER_EXTERNAL_URL`, which Render sets) every 10 minutes, so it stays awake. The free plan's 750 hours a month covers one service running all month. Set `KEEP_AWAKE=false` to turn this off. It does nothing outside Render.
 
 ### Vercel
 
