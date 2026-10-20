@@ -4,7 +4,65 @@
 
 @layer base {
   body {
-    @apply bg-paper text-ink antialiased selection:bg-amber-200 selection:text-stone-900;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    @apply bg-paper text-ink antialiased selection:bg-shared-soft selection:text-ink;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-display;
+    font-optical-sizing: auto;
+    letter-spacing: -0.01em;
+  }
+  /* Visible keyboard focus everywhere, in the shared colour. */
+  :focus-visible {
+    outline: 2px solid #6f42c1;
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex min-h-[48px] items-center justify-center gap-2 rounded-full bg-shared px-6 text-[15px] font-semibold text-white transition hover:bg-shared-ink disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-quiet {
+    @apply inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full border border-line bg-card px-4 text-sm font-medium text-ink transition hover:border-ink/30;
+  }
+  .field {
+    @apply w-full rounded-xl border border-line bg-paper px-3.5 py-3 text-[15px] outline-none transition placeholder:text-muted/80 focus:border-shared focus:bg-card;
+  }
+}
+
+/* The one orchestrated moment: the overlap draws in when a plan arrives. */
+@keyframes cg-lens {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.cg-lens {
+  animation: cg-lens 700ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  transform-origin: center;
+}
+@keyframes cg-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.cg-pulse {
+  animation: cg-pulse 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cg-lens,
+  .cg-pulse {
+    animation: none;
   }
 }

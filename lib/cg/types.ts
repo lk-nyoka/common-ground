@@ -25,6 +25,25 @@ export interface Person {
 
 export type PickKind = 'watch' | 'also' | 'listen' | 'swap';
 
+/** How one person's taste scores a pick: Qloo affinity, and its rank among tonight's candidates. */
+export interface PersonFit {
+  affinity: number; // Qloo affinity (0-1) for people who like this person's favourites
+  rank: number; // 1 = this person's best match among the candidates scored
+  /** 0-1 position on this person's own scale (their best candidate = 1, worst = 0). Scale-free, so
+   * a favourite whose fans score everything lower can't dominate. */
+  norm: number;
+}
+
+/** The evidence that a pick suits both people. Every number comes from Qloo. */
+export interface PickFit {
+  of: number; // how many candidates of this kind were scored
+  a?: PersonFit;
+  b?: PersonFit;
+  jointRank?: number; // position in Qloo's results for both tastes together
+  /** Qloo explainability: share of the pick driven by each person's favourites (sums to 1). */
+  share?: { a: number; b: number };
+}
+
 export interface Pick {
   id: string; // "pick-<qloo id>"
   qlooEntityId: string;
@@ -32,6 +51,7 @@ export interface Pick {
   type: string; // urn:entity:movie | tv_show | artist
   kind: PickKind;
   forWhom: 'both' | PersonId; // whose taste produced it
+  /** The planner's one-line note. Written by the AI (or the rules); `fit` holds the Qloo evidence. */
   reason: string;
   year?: number;
   activeFrom?: number;
@@ -39,6 +59,8 @@ export interface Pick {
   description?: string;
   contentRating?: string;
   affinity?: number;
+  durationMinutes?: number;
+  fit?: PickFit;
   provenance: 'qloo_live' | 'qloo_saved';
   capturedAt?: string;
   link?: { label: string; url: string };

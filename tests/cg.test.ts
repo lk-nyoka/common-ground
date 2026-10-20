@@ -6,8 +6,10 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { cleanSession, cleanVerdicts, InputError, trimForClient } from '../lib/cg/validate';
 import { applyFeedback, picksOf, sharedHitRate } from '../lib/cg/learn';
-import { planNight } from '../lib/cg/agent';
+import { fill, planNight } from '../lib/cg/agent';
 import { clearQlooCache } from '../lib/qloo-client';
+import { decodeInvite, encodeInvite } from '../lib/cg/invite';
+import { decodeResult, encodeResult, summarise as studySummary } from '../lib/cg/study';
 import { fav, newSession, person } from '../lib/cg/samples';
 import type { Session } from '../lib/cg/types';
 
@@ -29,6 +31,13 @@ const SEARCH: Record<string, any> = {
 };
 
 let calls: { url: string; body?: string }[] = [];
+
+/** Per-person affinity the fake Qloo returns for filter.results.entities (signal -> id -> score). */
+let AFF: Record<string, Record<string, number>> = {};
+const DEFAULT_AFF = (): Record<string, Record<string, number>> => ({
+  'ART-MET': { 'MOV-1': 0.95, 'MOV-3': 0.8, 'MOV-5': 0.85, 'TV-1': 0.7, 'ART-1': 0.6, 'ART-2': 0.95, 'ART-3': 0.5, 'ART-4': 0.9, 'ART-8': 0.7, 'ART-11': 0.3 },
+  'ART-TS': { 'MOV-1': 0.4, 'MOV-3': 0.85, 'MOV-5': 0.7, 'TV-1': 0.75, 'ART-1': 0.9, 'ART-2': 0.4, 'ART-3': 0.95, 'ART-4': 0.45, 'ART-9': 0.65, 'ART-12': 0.2 }
+});
 let gemini: ((body: any) => any) | null = null;
 
 function json(data: unknown, status = 200) {
@@ -52,21 +61,38 @@ function installFetch() {
           { name: 'Energetic', subtype: 'urn:tag:audience', query: { score: 0.7 } }
         ] } });
       }
+      if (u.pathname === '/v2/insights' && u.searchParams.get('filter.results.entities')) {
+        const type = u.searchParams.get('filter.type') || '';
+        const signal = u.searchParams.get('signal.interests.entities') || '';
+        const ids = (u.searchParams.get('filter.results.entities') || '').split(',');
+        const table = AFF[signal] || {};
+        return json({ success: true, results: { entities: ids.map((id) => ({ ...ent(id, id, type), query: { affinity: table[id] ?? 0.5 } })) } });
+      }
       if (u.pathname === '/v2/insights') {
         const type = u.searchParams.get('filter.type') || '';
         const signal = u.searchParams.get('signal.interests.entities') || '';
+        const explain = u.searchParams.get('feature.explainability') === 'true';
         const key = signal.includes(',') ? 'both' : signal;
         const list =
           type.includes('movie')
-            ? [ent('MOV-1', 'Titanic', type, ['Drama'], { release_year: 1997 }), ent('MOV-2', 'The Haunting', type, ['Horror']), ent('MOV-3', 'Slumdog Millionaire', type, ['Drama'], { release_year: 2008 })]
+            ? [
+                ent('MOV-1', 'Titanic', type, ['Drama'], { release_year: 1997, duration: 110 }),
+                ent('MOV-2', 'The Haunting', type, ['Horror']),
+                ent('MOV-3', 'Slumdog Millionaire', type, ['Drama'], { release_year: 2008, duration: 100 }),
+                ent('MOV-4', 'A Very Long Epic', type, ['Drama'], { duration: 240 }),
+                ent('MOV-5', 'Notting Hill', type, ['Romance'], { release_year: 1999, duration: 114 })
+              ]
             : type.includes('tv')
             ? [ent('TV-1', 'The Red Road', type, ['Drama'])]
             : key === 'both'
             ? [ent('ART-1', 'Coldplay', type), ent('ART-2', 'Nirvana', type), ent('ART-3', 'Katy Perry', type), ent('ART-4', 'Linkin Park', type)]
             : key === 'ART-MET'
-            ? [ent('ART-2', 'Nirvana', type), ent('ART-9', 'System of a Down', type)]
-            : [ent('ART-3', 'Katy Perry', type), ent('ART-8', 'Adele', type)];
-        return json({ success: true, results: { entities: list } });
+            ? [ent('ART-2', 'Nirvana', type), ent('ART-11', 'Slayer', type), ent('ART-9', 'System of a Down', type)]
+            : [ent('ART-3', 'Katy Perry', type), ent('ART-12', 'Ariana Grande', type), ent('ART-8', 'Adele', type)];
+        const withExplain = explain
+          ? list.map((e: any) => ({ ...e, query: { affinity: 0.9, explainability: { 'signal.interests.entities': [{ entity_id: 'ART-MET', score: 0.6 }, { entity_id: 'ART-TS', score: 0.4 }] } } }))
+          : list;
+        return json({ success: true, results: { entities: withExplain } });
       }
       return json({}, 404);
     }
@@ -88,6 +114,7 @@ const sample = (): Session =>
 
 beforeEach(() => {
   clearQlooCache();
+  AFF = DEFAULT_AFF();
   calls = [];
   gemini = null;
   process.env.QLOO_API_KEY = 'test-key';
@@ -138,9 +165,13 @@ test('plans only from Qloo results, applies exclusions, confirms tags', async ()
   const names = picksOf(plan).map((p) => p.name);
   assert.ok(names.length >= 5, `expected a full plan, got ${names.join(', ')}`);
   assert.ok(!names.includes('The Haunting'), 'horror should be excluded via its Qloo tags');
-  assert.equal(plan.watch?.name, 'Titanic');
-  // Swaps come from each side alone, not from the joint list.
+  // Fairness: Titanic is best for Thabo but worst for Naledi; Slumdog the reverse.
+  // Notting Hill is second for both, so on each person's own scale it is the fairest.
+  assert.equal(plan.watch?.name, 'Notting Hill');
+  // Swaps come from each side alone, chosen by the receiver's fit:
+  // from Thabo's side for Naledi: System of a Down (0.65) beats Slayer (0.2).
   assert.equal(plan.swap.forB?.name, 'System of a Down');
+  // from Naledi's side for Thabo: Adele (0.7) beats Ariana Grande (0.3).
   assert.equal(plan.swap.forA?.name, 'Adele');
   // Melodic is on both favourites' own tags -> confirmed. Blues is not -> unconfirmed.
   const melodic = plan.commonGround.find((t) => t.name === 'Melodic');
@@ -158,11 +189,33 @@ test("people's names never reach Qloo", async () => {
   for (const c of qloo) assert.ok(!/thabo|naledi/i.test(c.url + (c.body || '')), c.url);
 });
 
-test('balanced music: joint artists that also appear on each side come first', async () => {
+test('Mutual Fit Proof: every pick carries both people\'s ranks and the explainability split', async () => {
+  const s = await planNight(sample());
+  const w = s.plans[0].watch!;
+  assert.ok(w.fit?.a && w.fit?.b, 'watch pick has both ranks');
+  assert.equal(w.fit!.a!.affinity, 0.85);
+  assert.equal(w.fit!.b!.affinity, 0.7);
+  assert.equal(w.fit!.a!.rank, 2);
+  assert.equal(w.fit!.b!.rank, 2);
+  assert.equal(w.fit!.of, 3);
+  assert.equal(w.fit!.share?.a, 0.6);
+  assert.equal(w.fit!.share?.b, 0.4);
+  assert.match(w.reason, /#\d+ of \d+ for Thabo's taste and #\d+ for Naledi's/);
+});
+
+test('fair music: picks favour artists that suit both, not one person\'s favourites', async () => {
   const s = await planNight(sample());
   const listen = s.plans[0].listen.map((p) => p.name);
-  // Nirvana is on Thabo's side, Katy Perry on Naledi's: both should be in the three.
-  assert.ok(listen.includes('Nirvana') && listen.includes('Katy Perry'), listen.join(', '));
+  // Coldplay (0.6 / 0.9) and Katy Perry (0.5 / 0.95) and Linkin Park (0.9 / 0.45) vs Nirvana (0.95 / 0.4).
+  assert.ok(listen.includes('Coldplay'), listen.join(', '));
+  assert.equal(listen.length, 3);
+});
+
+test('time limit is real: films longer than the time you have are dropped', async () => {
+  const s = await planNight(sample());
+  const all = picksOf(s.plans[0]).map((p) => p.name);
+  assert.ok(!all.includes('A Very Long Epic'));
+  assert.ok(s.plans[0].trace.some((t) => /240 min, longer than your 120/.test(t.details)));
 });
 
 // ---------- the planner (LLM mode) ----------
@@ -174,12 +227,12 @@ test('LLM mode: names stay out of the prompt and invented picks are ignored', as
     prompt += JSON.stringify(body);
     return {
       candidates: [{ content: { parts: [{ text: JSON.stringify({
-        watch_id: 'MOV-3',
+        watch_id: 'MOV-5',
         also_ids: ['MOV-INVENTED'],
         listen_ids: ['ART-1'],
         for_a_id: 'ART-8',
         for_b_id: 'ART-9',
-        reasons: { 'MOV-3': '{A} and {B} both lean melodic.' },
+        reasons: { 'MOV-5': '{A} and {B} both lean melodic.' },
         why: ['One', 'Two', 'Three'],
         tonight: 'Watch it, {A}.'
       }) }] } }]
@@ -188,12 +241,23 @@ test('LLM mode: names stay out of the prompt and invented picks are ignored', as
   const s = await planNight(sample());
   const plan = s.plans[0];
   assert.equal(plan.planner, 'llm');
-  assert.equal(plan.watch?.name, 'Slumdog Millionaire');
+  assert.equal(plan.watch?.name, 'Notting Hill');
   assert.equal(plan.watch?.reason, 'Thabo and Naledi both lean melodic.');
-  assert.equal(plan.alsoWatch.length, 0, 'invented id must be dropped');
+  assert.ok(!picksOf(plan).some((p) => p.qlooEntityId === 'MOV-INVENTED'), 'invented id must be dropped');
+  assert.ok(plan.alsoWatch.length > 0, 'the empty slot is filled from the fair ranking');
+  assert.ok(plan.trace.some((t) => t.action === 'Filled gaps in the plan'));
+  assert.ok(plan.trace.every((t) => typeof t.ms === 'number'), 'every step is timed');
   assert.ok(plan.trace.some((t) => t.action === 'Ignored invalid picks'));
   assert.ok(!/thabo|naledi/i.test(prompt), 'names must not be sent to the model');
   assert.equal(plan.tonight, 'Watch it, Thabo.');
+});
+
+test('critic: an AI pick that is unfair to one person is replaced, and the trace says why', async () => {
+  process.env.GEMINI_API_KEY = 'test-gemini';
+  gemini = () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ watch_id: 'MOV-1', listen_ids: ['ART-1'] }) }] } }] });
+  const s = await planNight(sample());
+  assert.equal(s.plans[0].watch?.name, 'Notting Hill');
+  assert.ok(s.plans[0].trace.some((t) => t.action === 'Replaced an unfair pick' && /Titanic ranked low for Naledi/.test(t.details)));
 });
 
 test('LLM failure falls back to rules and says so', async () => {
@@ -205,11 +269,17 @@ test('LLM failure falls back to rules and says so', async () => {
   assert.ok(s.plans[0].watch);
 });
 
-test('Qloo down: no plan is invented', async () => {
+test('Qloo down: nothing is invented, and anything shown is labelled as saved Qloo data', async () => {
   globalThis.fetch = (async () => json({ error: 'down' }, 500)) as typeof fetch;
   const s = await planNight(sample());
-  assert.equal(picksOf(s.plans[0]).length, 0);
-  assert.ok(s.plans[0].notices.length > 0);
+  const plan = s.plans[0];
+  const picks = picksOf(plan);
+  assert.ok(plan.notices.length > 0, 'the plan must say something is wrong');
+  // With no saved responses on this machine there are no picks. If an earlier local run saved
+  // real Qloo responses (QLOO_CAPTURE), those may be used, but only with the "saved" label.
+  assert.ok(picks.every((p) => p.provenance === 'qloo_saved'), 'no pick may claim to be live');
+  if (picks.length) assert.equal(plan.qlooStatus, 'saved');
+  else assert.notEqual(plan.qlooStatus, 'live');
 });
 
 // ---------- learning ----------
@@ -234,10 +304,54 @@ test('feedback: both -> both signals, one -> that person, neither -> never again
   assert.equal(second.plans[0].number, 2);
 });
 
+test('fill puts names back even when the model forgets the braces', () => {
+  const s = sample();
+  assert.equal(fill("From B's favourites for A to discover.", s), "From Naledi's favourites for Thabo to discover.");
+  assert.equal(fill('A heartwarming film for {A} and {B}.', s), 'A heartwarming film for Thabo and Naledi.');
+  assert.equal(fill('A and B both lean melodic.', s), 'Thabo and Naledi both lean melodic.');
+  assert.equal(fill('A gripping story.', s), 'A gripping story.');
+});
+
 test('trimForClient keeps the session bounded', async () => {
   let s = await planNight(sample());
   for (let i = 0; i < 6; i++) s = { ...s, plans: [s.plans[0], ...s.plans] };
   const t = trimForClient(s);
   assert.ok(t.plans.length <= 4);
   assert.ok(t.plans.slice(1).every((p) => p.trace.length === 0));
+});
+
+// ---------- invite links and the blind study ----------
+
+test('invite links round-trip, including non-English names, and reject junk', () => {
+  const code = encodeInvite({ v: 1, from: { name: 'Lwazi Ndlovu', favs: [{ query: 'Beyoncé', type: 'urn:entity:artist' }, { query: 'Tsotsi', type: 'urn:entity:movie' }] }, toName: 'Gogo', minutes: 90, avoid: ['horror'] });
+  const inv = decodeInvite(`#invite=${code}`);
+  assert.ok(inv);
+  assert.equal(inv!.from.name, 'Lwazi Ndlovu');
+  assert.deepEqual(inv!.from.favs.map((f) => f.query), ['Beyoncé', 'Tsotsi']);
+  assert.equal(inv!.from.favs[1].type, 'urn:entity:movie');
+  assert.equal(inv!.toName, 'Gogo');
+  assert.equal(inv!.minutes, 90);
+  assert.equal(decodeInvite('#invite=not-real'), null);
+  assert.equal(decodeInvite('#something-else'), null);
+});
+
+test('study results encode without names and summarise per method', () => {
+  const code = encodeResult({
+    v: 1,
+    pair: 'abc',
+    at: '2026-10-21',
+    items: [
+      { s: ['qloo'], k: 'watch', a: 'yes', b: 'yes' },
+      { s: ['llm'], k: 'watch', a: 'yes', b: 'no' },
+      { s: ['qloo', 'llm'], k: 'listen', a: 'maybe', b: 'yes' }
+    ]
+  });
+  const r = decodeResult(code)!;
+  assert.equal(r.items.length, 3);
+  const s = studySummary([r]);
+  assert.equal(s.qloo.items, 2);
+  assert.equal(s.qloo.bothYes, 1);
+  assert.equal(s.llm.vetoed, 1);
+  assert.equal(s.qloo.worstOffScore, (1 + 0.5) / 2);
+  assert.equal(decodeResult('garbage'), null);
 });

@@ -24,19 +24,7 @@ export interface SamplePair {
 
 export const SAMPLE_PAIRS: SamplePair[] = [
   {
-    label: 'Thabo + Naledi',
-    hint: 'Metallica meets Taylor Swift',
-    make: () =>
-      newSession(
-        person('a', 'Thabo', [fav('Metallica', 'urn:entity:artist'), fav('The Dark Knight', 'urn:entity:movie')]),
-        person('b', 'Naledi', [fav('Taylor Swift', 'urn:entity:artist'), fav('The Notebook', 'urn:entity:movie')]),
-        120,
-        [],
-        true
-      )
-  },
-  {
-    label: 'Gogo + Lwazi',
+    label: 'Gogo and Lwazi',
     hint: 'Miriam Makeba meets Tyla',
     make: () =>
       newSession(
@@ -44,6 +32,18 @@ export const SAMPLE_PAIRS: SamplePair[] = [
         person('b', 'Lwazi', [fav('Tyla', 'urn:entity:artist'), fav('Black Panther', 'urn:entity:movie')]),
         120,
         ['horror'],
+        true
+      )
+  },
+  {
+    label: 'Thabo and Naledi',
+    hint: 'Metallica meets Taylor Swift',
+    make: () =>
+      newSession(
+        person('a', 'Thabo', [fav('Metallica', 'urn:entity:artist'), fav('The Dark Knight', 'urn:entity:movie')]),
+        person('b', 'Naledi', [fav('Taylor Swift', 'urn:entity:artist'), fav('The Notebook', 'urn:entity:movie')]),
+        120,
+        [],
         true
       )
   }

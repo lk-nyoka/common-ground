@@ -197,11 +197,14 @@ export default function HomePage() {
         </div>
 
         <h1 className="font-serif text-3xl sm:text-5xl font-black text-stone-950 tracking-tight leading-tight max-w-3xl mx-auto">
-          You remember three songs. Back Then finds what comes next.
+          You remember three songs. Gentle visit finds what comes next.
         </h1>
 
         <p className="text-stone-600 text-sm sm:text-base max-w-2xl mx-auto leading-relaxed font-sans">
-          <strong>Qloo</strong> finds culturally connected possibilities. Your reactions teach Back Then which ones still reach this person.
+          <strong>Qloo</strong> finds culturally connected possibilities. Your reactions teach Gentle visit which ones still reach this person.
+        </p>
+        <p className="text-stone-500 text-xs max-w-xl mx-auto leading-relaxed">
+          Experimental. A reminiscence aid for families, not medical advice or treatment. Stop anything that causes distress, and follow the care team’s guidance.
         </p>
 
         {/* The Two Doors (5-Second Explanation) */}

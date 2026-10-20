@@ -1,5 +1,5 @@
 /**
- * Care logic: the rules Back Then applies around whatever Qloo returns.
+ * Care logic: the rules Gentle visit applies around whatever Qloo returns.
  * Pure functions, safe on client or server. No invented content: every item in a kit
  * is either a family memory or a Qloo result, and every sentence is built from real data.
  */

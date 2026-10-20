@@ -34,9 +34,9 @@ export function clearQlooCache() {
 
 /**
  * Qloo rate-limits the hackathon key, so live calls go through a small limiter
- * (at most 2 at a time) and are retried on HTTP 429 with backoff.
+ * (3 at a time by default, QLOO_CONCURRENCY to change) and are retried on HTTP 429 with backoff.
  */
-const MAX_CONCURRENT = 2;
+const MAX_CONCURRENT = Number(process.env.QLOO_CONCURRENCY || 3);
 let active = 0;
 const waiting: Array<() => void> = [];
 async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
@@ -50,6 +50,11 @@ async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+let rateLimited = 0;
+/** For diagnostics: how many HTTP 429 answers Qloo has sent since the server started. */
+export function qlooRateLimitHits() {
+  return rateLimited;
+}
 
 export function qlooKeyIsSet(): boolean {
   return Boolean(process.env.QLOO_API_KEY);
@@ -128,7 +133,8 @@ async function qlooGet(
     try {
       const url = `${BASE_URL}${endpoint}?${new URLSearchParams(params).toString()}`;
       let res: Response | undefined;
-      for (let attempt = 0; attempt < 4; attempt++) {
+      // Up to 3 tries on HTTP 429, with short waits, so a busy key can't stall a plan for long.
+      for (let attempt = 0; attempt < 3; attempt++) {
         res = await withSlot(async () => {
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -139,8 +145,9 @@ async function qlooGet(
           }
         });
         if (res.status !== 429) break;
+        rateLimited++;
         const retryAfter = Number(res.headers.get('retry-after'));
-        await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 5000) : 700 * 2 ** attempt);
+        if (attempt < 2) await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 2500) : 600 * 2 ** attempt);
       }
       if (!res) throw new Error('no response');
       status = res.status;
@@ -196,6 +203,15 @@ function normaliseEntity(e: any, fallbackType?: string): QlooEntity | null {
     toYear(e.release_year) ??
     toYear(e.year);
   const affinity = typeof e.query?.affinity === 'number' ? e.query.affinity : undefined;
+  const explainList = e.query?.explainability?.['signal.interests.entities'];
+  const explain: Record<string, number> | undefined = Array.isArray(explainList)
+    ? Object.fromEntries(
+        explainList
+          .filter((x: any) => x && typeof x.entity_id === 'string' && typeof x.score === 'number')
+          .map((x: any) => [String(x.entity_id), x.score as number])
+      )
+    : undefined;
+  const duration = typeof props.duration === 'number' && props.duration > 0 && props.duration < 1000 ? Math.round(props.duration) : undefined;
   return {
     id: String(id),
     name: String(name),
@@ -208,7 +224,9 @@ function normaliseEntity(e: any, fallbackType?: string): QlooEntity | null {
     contentRating: typeof props.content_rating === 'string' ? props.content_rating : undefined,
     description: props.short_description || props.description || e.disambiguation || undefined,
     popularity: typeof e.popularity === 'number' ? e.popularity : undefined,
-    affinity
+    affinity,
+    durationMinutes: duration,
+    explain: explain && Object.keys(explain).length ? explain : undefined
   };
 }
 
@@ -245,7 +263,7 @@ let yearFilterRejected = false;
 export async function qlooRelated(
   entityId: string,
   targetType: string,
-  opts: { take?: number; maxYear?: number } = {}
+  opts: { take?: number; maxYear?: number; explain?: boolean } = {}
 ): Promise<QlooResult<QlooEntity[]> & { yearFilterApplied: boolean }> {
   const take = opts.take ?? 8;
   const base: Record<string, string> = {
@@ -253,6 +271,8 @@ export async function qlooRelated(
     'signal.interests.entities': entityId,
     take: String(take)
   };
+  // Per-result contribution of each input entity (verified on the hackathon API, Oct 2026).
+  if (opts.explain) base['feature.explainability'] = 'true';
 
   const yearCapable = targetType === 'urn:entity:movie' || targetType === 'urn:entity:tv_show';
   if (yearCapable && opts.maxYear && !yearFilterRejected) {
@@ -297,5 +317,27 @@ export async function qlooCompare(aIds: string[], bIds: string[], take = 12): Pr
   const data = tags
     .filter((t) => t && t.name)
     .map((t) => ({ name: String(t.name), subtype: String(t.subtype || ''), score: typeof t.query?.score === 'number' ? t.query.score : 0 }));
+  return { source: res.source, data, capturedAt: res.capturedAt, error: res.error };
+}
+
+/**
+ * Score specific entities against a taste signal: Qloo's affinity of each candidate for people
+ * who like `signalIds`. Uses filter.results.entities (verified on the hackathon API, Oct 2026).
+ * Returns a map of entity id -> affinity (0-1). Candidates Qloo doesn't score are absent.
+ */
+export async function qlooScore(signalIds: string[], targetType: string, candidateIds: string[]): Promise<QlooResult<Record<string, number>>> {
+  const ids = Array.from(new Set(candidateIds)).slice(0, 50);
+  if (!signalIds.length || !ids.length) return { source: 'unavailable', data: {}, error: 'nothing to score' };
+  const res = await qlooGet('/v2/insights', {
+    'filter.type': targetType,
+    'signal.interests.entities': signalIds.join(','),
+    'filter.results.entities': ids.join(','),
+    take: String(ids.length)
+  });
+  const data: Record<string, number> = {};
+  for (const raw of extractEntities(res.raw)) {
+    const e = normaliseEntity(raw, targetType);
+    if (e && typeof e.affinity === 'number' && ids.includes(e.id)) data[e.id] = e.affinity;
+  }
   return { source: res.source, data, capturedAt: res.capturedAt, error: res.error };
 }

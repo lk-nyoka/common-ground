@@ -9,7 +9,9 @@
     "start": "next start",
     "test:qloo": "node scripts/test-qloo.mjs",
     "test": "node -e \"require('fs').rmSync('.test-build',{recursive:true,force:true})\" && tsc -p tsconfig.test.json && node --test .test-build/tests/cg.test.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:live": "node -e \"require('fs').rmSync('.test-build',{recursive:true,force:true})\" && tsc -p tsconfig.test.json && node .test-build/tests/live-plan.js",
+    "eval": "node -e \"require('fs').rmSync('.test-build',{recursive:true,force:true})\" && tsc -p tsconfig.test.json && node .test-build/tests/eval.js"
   },
   "keywords": [],
   "author": "",

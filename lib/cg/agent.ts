@@ -10,24 +10,15 @@
  * Names of the people are never sent to Qloo or the LLM.
  */
 import type { AgentTraceStep, QlooEntity, QlooStatus } from '../types';
-import { qlooCompare, qlooKeyIsSet, qlooRelated, qlooSearch, savedFixtureCount } from '../qloo-client';
+import { qlooCompare, qlooKeyIsSet, qlooRelated, qlooScore, qlooSearch, savedFixtureCount } from '../qloo-client';
 import { extractJson, FunctionDeclaration, GeminiContent, GeminiPart, geminiGenerate, llmIsConfigured, modelOf } from '../llm';
-import type { Favourite, Person, PersonId, Pick, PickKind, Plan, Session, SharedTag } from './types';
+import { fold, namesMatch } from './match';
+import type { Favourite, Person, PersonFit, PersonId, Pick, PickFit, PickKind, Plan, Session, SharedTag } from './types';
 
 type Source = 'live' | 'saved' | 'unavailable';
 
 const MAX_SIGNALS = 6;
 const MAX_EXTRA_TOOL_CALLS = 3;
-
-function fold(s: string): string {
-  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function namesMatch(a: string, b: string): boolean {
-  const x = fold(a);
-  const y = fold(b);
-  return x === y || (x.length >= 4 && y.includes(x)) || (y.length >= 4 && x.includes(y));
-}
 
 function linkFor(name: string, type: string): Pick['link'] {
   if (type.includes('artist')) return { label: 'Find on Spotify', url: `https://open.spotify.com/search/${encodeURIComponent(name)}` };
@@ -40,10 +31,19 @@ class Run {
   errors: string[] = [];
   savedDates: string[] = [];
   extraCalls = 0;
-  deadline = Date.now() + 40000;
+  start = Date.now();
+  /** The whole plan aims to finish within this budget; the AI gets whatever Qloo leaves. */
+  deadline = this.start + 42000;
+  constructor(private onStep?: (step: AgentTraceStep) => void) {}
 
   add(type: AgentTraceStep['type'], action: string, details: string) {
-    this.trace.push({ step: this.trace.length + 1, type, action, details });
+    const step = { step: this.trace.length + 1, type, action, details, ms: Date.now() - this.start };
+    this.trace.push(step);
+    try {
+      this.onStep?.(step);
+    } catch {
+      /* a broken listener must never break planning */
+    }
   }
   note(source: Source, capturedAt?: string, error?: string) {
     this.sources.push(source);
@@ -71,6 +71,13 @@ async function resolveFavourites(run: Run, session: Session) {
   const jobs: { fav: Favourite }[] = [];
   for (const p of session.people) for (const fav of p.favourites) if (!fav.qlooEntityId && !fav.unmatched && fav.query.trim()) jobs.push({ fav });
   const results = await Promise.all(jobs.map(({ fav }) => qlooSearch(fav.query, fav.type, 5)));
+  // If Qloo was busy for some searches, try those once more, one at a time.
+  for (let i = 0; i < results.length; i++) {
+    if (results[i].source === 'unavailable' && Date.now() < run.deadline - 20000) {
+      await new Promise((r) => setTimeout(r, 800));
+      results[i] = await qlooSearch(jobs[i].fav.query, jobs[i].fav.type, 5);
+    }
+  }
   results.forEach((res, i) => {
     const fav = jobs[i].fav;
     run.note(res.source, res.capturedAt, res.error);
@@ -116,10 +123,20 @@ interface Pools {
   aWorld: QlooEntity[]; // artists from A's side
   bWorld: QlooEntity[]; // artists from B's side
   sourceOf: Map<string, { source: Source; capturedAt?: string }>;
+  fit: Map<string, PickFit>; // Qloo evidence per candidate id
 }
 
-async function related(run: Run, session: Session, label: string, ids: string[], type: string, take: number, pools: Pools) {
-  const res = await qlooRelated(ids.join(','), type, { take });
+async function related(
+  run: Run,
+  session: Session,
+  label: string,
+  ids: string[],
+  type: string,
+  take: number,
+  pools: Pools,
+  opts: { explain?: boolean } = {}
+) {
+  const res = await qlooRelated(ids.join(','), type, { take, explain: opts.explain });
   run.note(res.source, res.capturedAt, res.error);
   run.add('tool_call', 'qloo_related', `qloo_related(from=${label}, target_type="${type}")`);
   if (res.source === 'unavailable') {
@@ -133,6 +150,8 @@ async function related(run: Run, session: Session, label: string, ids: string[],
     if (favIds.has(e.id)) dropped.push(`${e.name} (already a favourite)`);
     else if (session.seen.includes(e.id)) dropped.push(`${e.name} (suggested before)`);
     else if (session.rejected.includes(e.id)) dropped.push(`${e.name} (neither of you liked it)`);
+    else if (type === 'urn:entity:movie' && e.durationMinutes && e.durationMinutes > session.minutes)
+      dropped.push(`${e.name} (${e.durationMinutes} min, longer than your ${session.minutes})`);
     else {
       const ex = excludedBy(session, e);
       if (ex) dropped.push(`${e.name} (excluded: ${ex})`);
@@ -150,6 +169,86 @@ async function related(run: Run, session: Session, label: string, ids: string[],
     }${dropped.length ? `; dropped ${dropped.length}: ${dropped.slice(0, 3).join(', ')}` : ''}.`
   );
   return kept;
+}
+
+/**
+ * The Mutual Fit Proof. For each list of candidates, ask Qloo how strongly each person's taste
+ * scores every candidate (filter.results.entities), then rank candidates per person. For swaps,
+ * score the other person's world against the person who will receive it.
+ */
+type ScoreJob = { list: QlooEntity[]; type: string; who: ('a' | 'b')[] };
+
+/** Score one or more candidate lists for each person (filter.results.entities). Returns counts. */
+async function scoreJobs(run: Run, pools: Pools, jobs: ScoreJob[], aSig: string[], bSig: string[]) {
+  const calls = jobs.filter((j) => j.list.length > 0).flatMap((j) => j.who.map((w) => ({ job: j, who: w })));
+  const results = await Promise.all(calls.map((c) => qlooScore(c.who === 'a' ? aSig : bSig, c.job.type, c.job.list.map((e) => e.id))));
+  let scored = 0;
+  results.forEach((res, i) => {
+    const { job, who } = calls[i];
+    run.note(res.source, res.capturedAt, res.error);
+    if (res.source === 'unavailable') return;
+    const ranked = job.list.filter((e) => typeof res.data[e.id] === 'number').sort((x, y) => res.data[y.id] - res.data[x.id]);
+    const hi = ranked.length ? res.data[ranked[0].id] : 0;
+    const lo = ranked.length ? res.data[ranked[ranked.length - 1].id] : 0;
+    ranked.forEach((e, idx) => {
+      const fit = pools.fit.get(e.id) || { of: job.list.length };
+      const pf: PersonFit = { affinity: res.data[e.id], rank: idx + 1, norm: hi > lo ? (res.data[e.id] - lo) / (hi - lo) : 0.5 };
+      fit[who] = pf;
+      fit.of = job.list.length;
+      pools.fit.set(e.id, fit);
+    });
+    scored += ranked.length;
+  });
+  return { calls: calls.length, scored };
+}
+
+/** After scoring: joint positions, the explainability split, and one summary step in the trace. */
+function finishScoring(run: Run, pools: Pools, aSig: string[], bSig: string[], totals: { calls: number; scored: number }) {
+  const aSet = new Set(aSig);
+  const bSet = new Set(bSig);
+  for (const list of [pools.movies, pools.tv, pools.artists]) {
+    list.forEach((e, idx) => {
+      const fit = pools.fit.get(e.id) || { of: list.length };
+      fit.jointRank = idx + 1;
+      if (e.explain) {
+        let a = 0;
+        let b = 0;
+        for (const [id, score] of Object.entries(e.explain)) {
+          if (aSet.has(id) && !bSet.has(id)) a += score;
+          else if (bSet.has(id) && !aSet.has(id)) b += score;
+        }
+        if (a + b > 0) fit.share = { a: a / (a + b), b: b / (a + b) };
+      }
+      pools.fit.set(e.id, fit);
+    });
+  }
+  run.add('tool_call', 'qloo_score', `Scored every candidate against each person's taste on its own (${totals.calls} Qloo calls with filter.results.entities).`);
+  run.add(
+    'tool_result',
+    'qloo_score result',
+    totals.scored ? `${totals.scored} scores returned. Each pick now shows its rank for each of you.` : 'No scores came back, so picks show no per-person ranks this time.'
+  );
+}
+
+/**
+ * Fairness (maximin): a pick is only as good as it is for the person it suits least, measured on
+ * each person's own scale (see PersonFit.norm). Qloo's raw affinity breaks ties, so in a very small
+ * pool the pick with the better worse-case affinity still wins. Unscored candidates score 0.
+ */
+export function fairScore(fit: PickFit | undefined): number {
+  if (!fit?.a || !fit?.b) return 0;
+  return Math.min(fit.a.norm, fit.b.norm) + 0.01 * Math.min(fit.a.affinity, fit.b.affinity) + 0.0001 * (fit.a.norm + fit.b.norm);
+}
+
+function byFairness(list: QlooEntity[], pools: Pools): QlooEntity[] {
+  if (!list.some((e) => pools.fit.get(e.id)?.a || pools.fit.get(e.id)?.b)) return list; // no scores: keep Qloo's order
+  return [...list].sort((x, y) => fairScore(pools.fit.get(y.id)) - fairScore(pools.fit.get(x.id)));
+}
+
+/** For a swap, the best item is the one the receiving person's taste scores highest. */
+function byReceiver(list: QlooEntity[], pools: Pools, who: 'a' | 'b'): QlooEntity[] {
+  if (!list.some((e) => pools.fit.get(e.id)?.[who])) return list;
+  return [...list].sort((x, y) => (pools.fit.get(y.id)?.[who]?.affinity ?? 0) - (pools.fit.get(x.id)?.[who]?.affinity ?? 0));
 }
 
 /** Shared tags from Qloo compare, verified against each person's own favourites' tags. */
@@ -188,6 +287,8 @@ function toPick(e: QlooEntity, kind: PickKind, forWhom: 'both' | PersonId, reaso
     description: e.description,
     contentRating: e.contentRating,
     affinity: e.affinity,
+    durationMinutes: e.durationMinutes,
+    fit: pools.fit.get(e.id),
     provenance: src.source === 'saved' ? 'qloo_saved' : 'qloo_live',
     capturedAt: src.source === 'saved' ? src.capturedAt : undefined,
     link: linkFor(e.name, e.type)
@@ -208,42 +309,38 @@ interface Choice {
   model?: string; // the Gemini model that wrote the final plan
 }
 
-/** Joint artists ordered so neither person's taste drowns out the other's:
- * first those Qloo also returns from each person's side alone, alternating sides, then the rest. */
-function balancedListen(pools: Pools): QlooEntity[] {
-  const inA = new Set(pools.aWorld.map((e) => e.id));
-  const inB = new Set(pools.bWorld.map((e) => e.id));
-  const both = pools.artists.filter((e) => inA.has(e.id) && inB.has(e.id));
-  const aOnly = pools.artists.filter((e) => inA.has(e.id) && !inB.has(e.id));
-  const bOnly = pools.artists.filter((e) => inB.has(e.id) && !inA.has(e.id));
-  const out: QlooEntity[] = [...both];
-  for (let i = 0; i < Math.max(aOnly.length, bOnly.length); i++) {
-    if (aOnly[i]) out.push(aOnly[i]);
-    if (bOnly[i]) out.push(bOnly[i]);
-  }
-  for (const e of pools.artists) if (!out.includes(e)) out.push(e);
-  return out;
-}
-
+/**
+ * Rules planner. Picks are ordered by fairness: the best pick is the one whose worse score,
+ * across the two people, is highest. Swaps go to whoever's taste scores them highest.
+ */
 function rulesChoice(session: Session, pools: Pools): Choice {
   const short = session.minutes <= 60;
-  const first = short ? pools.tv : pools.movies;
-  const second = short ? pools.movies : pools.tv;
+  const first = byFairness(short ? pools.tv : pools.movies, pools);
+  const second = byFairness(short ? pools.movies : pools.tv, pools);
   const watch = first[0] || second[0];
-  const also = [second.find((e) => e.id !== watch?.id), first.find((e, i) => i > 0 && e.id !== watch?.id)].filter(Boolean) as QlooEntity[];
-  const listen = balancedListen(pools).slice(0, 3);
-  const used = new Set([...listen.map((l) => l.id)]);
-  const forB = pools.aWorld.find((e) => !used.has(e.id));
+  const also = [second.find((e) => e.id !== watch?.id), first.find((e) => e.id !== watch?.id)].filter(Boolean) as QlooEntity[];
+  const listen = byFairness(pools.artists, pools).slice(0, 3);
+  const used = new Set(listen.map((l) => l.id));
+  const forB = byReceiver(pools.aWorld, pools, 'b').find((e) => !used.has(e.id));
   if (forB) used.add(forB.id);
-  const forA = pools.bWorld.find((e) => !used.has(e.id));
+  const forA = byReceiver(pools.bWorld, pools, 'a').find((e) => !used.has(e.id));
   return {
     watchId: watch?.id,
-    alsoIds: also.slice(0, 2).map((e) => e.id),
+    alsoIds: Array.from(new Set(also.map((e) => e.id))).slice(0, 2),
     listenIds: listen.map((e) => e.id),
     forAId: forA?.id,
     forBId: forB?.id,
     reasons: {}
   };
+}
+
+/** Plain-language evidence for the brief, e.g. "{A} #2, {B} #4 of 10; 55% from {A}'s favourites". */
+function fitText(fit: PickFit | undefined, only?: 'a' | 'b') {
+  if (!fit) return '';
+  const part = (w: 'a' | 'b') => (fit[w] ? `{${w.toUpperCase()}} #${fit[w]!.rank}` : '');
+  const ranks = (only ? [part(only)] : [part('a'), part('b')]).filter(Boolean).join(', ');
+  const share = fit.share && !only ? `; ${Math.round(fit.share.a * 100)}% from {A}'s favourites` : '';
+  return ranks ? ` [fit: ${ranks} of ${fit.of}${share}]` : '';
 }
 
 const TOOLS: FunctionDeclaration[] = [
@@ -267,19 +364,31 @@ const SYSTEM = `You are the planning agent for Common Ground, which helps two pe
 You get each person's favourites, Qloo's shared taste tags, candidate lists from Qloo with ids, the time they have, things to avoid, and what worked before.
 Choose tonight's plan from the candidates only:
 - one thing to watch (a film, or a TV show if time is short)
-- up to two alternatives to watch
-- up to three artists to listen to together, balanced so each person hears something close to their own taste
+- two alternatives to watch
+- three artists to listen to together
 - one artist from {A}'s side for {B} to try, and one from {B}'s side for {A}
+Each candidate shows its fit: its rank for {A}'s taste and for {B}'s taste among the candidates Qloo scored
+(#1 = best), and how much each person's favourites drove it. Choose picks that rank well for BOTH people.
+Don't choose a pick that sits in the bottom third for either person unless nothing better exists.
+For swaps, prefer the candidate with the best rank for the person receiving it.
 You may call qloo_related at most ${MAX_EXTRA_TOOL_CALLS} times to explore further.
 Then reply with ONE JSON object and nothing else:
 {"watch_id": "...", "also_ids": ["..."], "listen_ids": ["..."], "for_a_id": "...", "for_b_id": "...",
  "reasons": {"<id>": "one short reason tied to the shared tags or favourites"},
  "why": ["three short reasons for this plan"], "tonight": "one or two sentences: how to spend the time"}
-Only use ids that appear in the brief or in tool results. Never invent titles, facts or connections. Keep it warm and brief.`;
+Only use ids that appear in the brief or in tool results. Never invent titles, facts or connections. Always write the people as {A} and {B}, with the braces. Never promise they will enjoy or love something: say why it may suit them, based on the tags, favourites and fit. Keep it warm and brief.`;
 
 async function llmChoice(run: Run, session: Session, pools: Pools, tags: SharedTag[]): Promise<Choice> {
   const [A, B] = session.people;
-  const list = (es: QlooEntity[]) => es.map((e) => `  - id "${e.id}": ${e.name}${e.year ? ` (${e.year})` : e.activeFrom ? ` (from ${e.activeFrom})` : ''}${e.contentRating ? `, ${e.contentRating}` : ''}`).join('\n') || '  - none';
+  const list = (es: QlooEntity[], only?: 'a' | 'b') =>
+    es
+      .map(
+        (e) =>
+          `  - id "${e.id}": ${e.name}${e.year ? ` (${e.year})` : e.activeFrom ? ` (from ${e.activeFrom})` : ''}${e.durationMinutes ? `, ${e.durationMinutes} min` : ''}${
+            e.contentRating ? `, ${e.contentRating}` : ''
+          }${fitText(pools.fit.get(e.id), only)}`
+      )
+      .join('\n') || '  - none';
   const last = session.feedback[0];
   const lastLine = last ? Object.entries(last.verdicts).map(([id, v]) => `${last.names[id]}: ${v === 'both' ? 'both loved' : v === 'neither' ? 'neither liked' : `only {${v.toUpperCase()}} liked`}`).join('; ') : 'no earlier plans';
   const brief = `Time together: ${session.minutes} minutes, at home.
@@ -295,10 +404,10 @@ TV from both tastes together:
 ${list(pools.tv)}
 Artists from both tastes together:
 ${list(pools.artists)}
-Artists from {A}'s side (candidates for {B} to try):
-${list(pools.aWorld)}
-Artists from {B}'s side (candidates for {A} to try):
-${list(pools.bWorld)}`;
+Artists from {A}'s side (candidates for {B} to try; fit is {B}'s):
+${list(pools.aWorld, 'b')}
+Artists from {B}'s side (candidates for {A} to try; fit is {A}'s):
+${list(pools.bWorld, 'a')}`;
 
   run.add('thought', 'Agent briefed', `The planning model receives favourites, shared tags, Qloo candidates, time and exclusions. It does not receive either person's name.`);
   const contents: GeminiContent[] = [{ role: 'user', parts: [{ text: brief }] }];
@@ -366,13 +475,111 @@ ${list(pools.bWorld)}`;
   return choice;
 }
 
-function fill(text: string, session: Session) {
-  return text.split('{A}').join(session.people[0].name).split('{B}').join(session.people[1].name);
+/**
+ * The agent's own check on the AI's choice. If the AI picked something to watch that sits in the
+ * bottom third for either person while a fairer option exists, swap it and say so in the trace.
+ */
+function critic(run: Run, session: Session, pools: Pools, choice: Choice): Choice {
+  const fit = choice.watchId ? pools.fit.get(choice.watchId) : undefined;
+  if (!fit || !fit.a || !fit.b) return choice;
+  const worst = Math.min(fit.a.norm, fit.b.norm); // on each person's own scale
+  // Compare like with like: ranks are only comparable within the same list (films or TV).
+  const sameList = pools.movies.some((e) => e.id === choice.watchId) ? pools.movies : pools.tv;
+  const pool = sameList.filter((e) => e.id !== choice.watchId);
+  const better = byFairness(pool, pools)[0];
+  const lowForSomeone = worst < 1 / 3;
+  if (!lowForSomeone || !better || fairScore(pools.fit.get(better.id)) <= fairScore(fit) + 0.005) {
+    run.add(
+      'guardrail',
+      'Checked the pick is fair',
+      lowForSomeone
+        ? 'The film or show scores low for one of you, but no other candidate suits you both better, so it stands.'
+        : "The film or show scores reasonably for both of you on your own scales, so the AI's choice stands."
+    );
+    return choice;
+  }
+  const name = (id?: string) => [...pools.movies, ...pools.tv].find((e) => e.id === id)?.name || 'its pick';
+  const lowFor = fit.a.norm < fit.b.norm ? session.people[0].name : session.people[1].name;
+  run.add('guardrail', 'Replaced an unfair pick', `${name(choice.watchId)} ranked low for ${lowFor}, so ${better.name}, which scores more evenly for both of you, is tonight's pick instead.`);
+  const reasons = { ...choice.reasons };
+  delete reasons[choice.watchId!];
+  return { ...choice, watchId: better.id, alsoIds: choice.alsoIds.filter((id) => id !== better.id), reasons };
 }
 
-export async function planNight(input: Session): Promise<Session> {
+/** If the AI left a slot empty, fill it from the fair rules ranking, so every plan is complete. */
+function fillGaps(run: Run, choice: Choice, rules: Choice): Choice {
+  const used = new Set([choice.watchId, ...choice.alsoIds, ...choice.listenIds, choice.forAId, choice.forBId].filter(Boolean) as string[]);
+  const take = (ids: (string | undefined)[], n: number, have: string[]) => {
+    const out = [...have];
+    for (const id of ids) {
+      if (out.length >= n) break;
+      if (id && !used.has(id)) {
+        out.push(id);
+        used.add(id);
+      }
+    }
+    return out;
+  };
+  const filled: string[] = [];
+  const next: Choice = { ...choice };
+  if (!next.watchId && rules.watchId && !used.has(rules.watchId)) {
+    next.watchId = rules.watchId;
+    used.add(rules.watchId);
+    filled.push('the pick to watch');
+  }
+  const also = take([rules.watchId, ...rules.alsoIds], 2, next.alsoIds);
+  if (also.length > next.alsoIds.length) filled.push(`${also.length - next.alsoIds.length} alternative(s)`);
+  next.alsoIds = also;
+  const listen = take(rules.listenIds, 3, next.listenIds);
+  if (listen.length > next.listenIds.length) filled.push(`${listen.length - next.listenIds.length} artist(s)`);
+  next.listenIds = listen;
+  if (!next.forAId && rules.forAId && !used.has(rules.forAId)) {
+    next.forAId = rules.forAId;
+    used.add(rules.forAId);
+    filled.push('a swap');
+  }
+  if (!next.forBId && rules.forBId && !used.has(rules.forBId)) {
+    next.forBId = rules.forBId;
+    filled.push('a swap');
+  }
+  if (filled.length) run.add('guardrail', 'Filled gaps in the plan', `The AI left some slots empty, so the fair ranking filled ${filled.join(', ')}.`);
+  return next;
+}
+
+/** A reason built only from Qloo evidence, used when the planner gave none. Never overstates. */
+function jointReason(fit: PickFit | undefined, session: Session, tagLine?: string) {
+  const [A, B] = session.people;
+  if (fit?.a && fit?.b) {
+    const ranks = `#${fit.a.rank} of ${fit.of} for ${A.name}'s taste and #${fit.b.rank} for ${B.name}'s`;
+    return fit.a.norm >= 2 / 3 && fit.b.norm >= 2 / 3 ? `A strong match for you both: ${ranks}.` : `The most even option Qloo found: ${ranks}.`;
+  }
+  return `Qloo found it from both your favourites together${tagLine ? `; you both lean ${tagLine}` : ''}.`;
+}
+
+/** Put names back in. Also catches the model writing "A's" or "for B" without braces. */
+export function fill(text: string, session: Session) {
+  const [a, b] = [session.people[0].name, session.people[1].name];
+  const nameOf = (x: string) => (x === 'A' ? a : b);
+  return text
+    .split('{A}')
+    .join(a)
+    .split('{B}')
+    .join(b)
+    .replace(/\b([AB]) and ([AB])\b/g, (_, x, y) => `${nameOf(x)} and ${nameOf(y)}`)
+    .replace(/\b([AB])'s\b/g, (_, x) => `${nameOf(x)}'s`)
+    .replace(/\b(for|to|with|from) ([AB])\b(?![\w'])/g, (_, w, x) => `${w} ${nameOf(x)}`);
+}
+
+export interface PlanOptions {
+  /** Called as each agent step happens, so the browser can show real progress. */
+  onStep?: (step: AgentTraceStep) => void;
+  /** Qloo only, no AI planner (used to pre-warm the cache for the example pairs). */
+  noLlm?: boolean;
+}
+
+export async function planNight(input: Session, opts: PlanOptions = {}): Promise<Session> {
   const session: Session = JSON.parse(JSON.stringify(input));
-  const run = new Run();
+  const run = new Run(opts.onStep);
   const [A, B] = session.people;
   const notices: string[] = [];
   run.add('guardrail', 'Privacy', `Only favourites and Qloo ids go to Qloo. "${A.name}" and "${B.name}" stay in this app.`);
@@ -385,20 +592,42 @@ export async function planNight(input: Session): Promise<Session> {
 
   const aSig = signalsOf(A);
   const bSig = signalsOf(B);
-  const pools: Pools = { movies: [], tv: [], artists: [], aWorld: [], bWorld: [], sourceOf: new Map() };
+  const pools: Pools = { movies: [], tv: [], artists: [], aWorld: [], bWorld: [], sourceOf: new Map(), fit: new Map() };
   let tags: SharedTag[] = [];
 
   if (aSig.length && bSig.length) {
     const both = Array.from(new Set([...aSig, ...bSig]));
     const label = `both (${[...favNames(A), ...favNames(B)].slice(0, 4).join(' + ')})`;
-    const [cmp, movies, tv, artists, aWorld, bWorld] = await Promise.all([
-      qlooCompare(aSig, bSig, 12),
-      related(run, session, label, both, 'urn:entity:movie', 10, pools),
-      related(run, session, label, both, 'urn:entity:tv_show', 8, pools),
-      related(run, session, label, both, 'urn:entity:artist', 10, pools),
+    // Pipelined: each list is scored for both people as soon as Qloo returns it.
+    const films = related(run, session, label, both, 'urn:entity:movie', 30, pools, { explain: true }).then((list) => {
+      pools.movies = list;
+      return scoreJobs(run, pools, [{ list, type: 'urn:entity:movie', who: ['a', 'b'] }], aSig, bSig);
+    });
+    const shows = related(run, session, label, both, 'urn:entity:tv_show', 10, pools, { explain: true }).then((list) => {
+      pools.tv = list;
+      return scoreJobs(run, pools, [{ list, type: 'urn:entity:tv_show', who: ['a', 'b'] }], aSig, bSig);
+    });
+    const music = Promise.all([
+      related(run, session, label, both, 'urn:entity:artist', 12, pools, { explain: true }),
       related(run, session, `${A.name}'s side`, aSig, 'urn:entity:artist', 8, pools),
       related(run, session, `${B.name}'s side`, bSig, 'urn:entity:artist', 8, pools)
-    ]);
+    ]).then(([artists, aWorld, bWorld]) => {
+      // Keep each person's side distinct from the joint list, so swaps add something new.
+      const joint = new Set(artists.map((e) => e.id));
+      Object.assign(pools, { artists, aWorld: aWorld.filter((e) => !joint.has(e.id)), bWorld: bWorld.filter((e) => !joint.has(e.id)) });
+      return scoreJobs(
+        run,
+        pools,
+        [
+          { list: pools.artists, type: 'urn:entity:artist', who: ['a', 'b'] },
+          { list: pools.bWorld, type: 'urn:entity:artist', who: ['a'] },
+          { list: pools.aWorld, type: 'urn:entity:artist', who: ['b'] }
+        ],
+        aSig,
+        bSig
+      );
+    });
+    const [cmp, ...counts] = await Promise.all([qlooCompare(aSig, bSig, 12), films, shows, music]);
     run.note(cmp.source, cmp.capturedAt, cmp.error);
     run.add('tool_call', 'qloo_compare', `qloo_compare(a=${A.name}'s favourites, b=${B.name}'s favourites)`);
     tags = verifyTags(session, cmp.data);
@@ -409,20 +638,23 @@ export async function planNight(input: Session): Promise<Session> {
         ? `No answer: ${cmp.error || 'unavailable'}.`
         : `${cmp.data.length} shared tags [${tag(cmp.source, cmp.capturedAt)}]; ${tags.filter((t) => t.confirmed).length} confirmed on both people's own favourites: ${tags.map((t) => `${t.name}${t.confirmed ? '' : ' (unconfirmed)'}`).join(', ') || 'none'}.`
     );
-    // Keep each person's side distinct from the joint list, so swaps add something new.
-    const joint = new Set(artists.map((e) => e.id));
-    Object.assign(pools, { movies, tv, artists, aWorld: aWorld.filter((e) => !joint.has(e.id)), bWorld: bWorld.filter((e) => !joint.has(e.id)) });
+    finishScoring(run, pools, aSig, bSig, counts.reduce((t, c) => ({ calls: t.calls + c.calls, scored: t.scored + c.scored }), { calls: 0, scored: 0 }));
   } else if (qlooKeyIsSet() || (await savedFixtureCount()) > 0) {
-    run.add('guardrail', 'Not enough to compare', 'Each person needs at least one favourite that Qloo recognises.');
-    notices.push('Each of you needs at least one favourite that Qloo recognises. Try a well-known artist, film or show.');
+    const busy = session.people.some((p) => p.favourites.some((f) => !f.qlooEntityId && !f.unmatched));
+    run.add('guardrail', 'Not enough to compare', busy ? 'Qloo did not answer for some favourites.' : 'Each person needs at least one favourite that Qloo recognises.');
+    notices.push(
+      busy
+        ? 'Qloo was busy and couldn’t look up all your favourites. Please try again in a moment.'
+        : 'Each of you needs at least one favourite that Qloo recognises. Try a well-known artist, film or show.'
+    );
   }
 
   let choice: Choice = rulesChoice(session, pools);
   let planner: 'llm' | 'rules' = 'rules';
   const havePools = pools.movies.length + pools.tv.length + pools.artists.length > 0;
-  if (havePools && llmIsConfigured()) {
+  if (havePools && llmIsConfigured() && !opts.noLlm) {
     try {
-      choice = await llmChoice(run, session, pools, tags);
+      choice = fillGaps(run, critic(run, session, pools, await llmChoice(run, session, pools, tags)), rulesChoice(session, pools));
       planner = 'llm';
     } catch (err: any) {
       const msg = String(err?.message || err).slice(0, 160);
@@ -442,16 +674,15 @@ export async function planNight(input: Session): Promise<Session> {
   const all = new Map<string, QlooEntity>();
   for (const e of [...pools.movies, ...pools.tv, ...pools.artists, ...pools.aWorld, ...pools.bWorld]) all.set(e.id, e);
   const tagLine = tags.filter((t) => t.confirmed).slice(0, 2).map((t) => t.name).join(' and ');
-  const bothLabel = `${A.name} and ${B.name}`;
   const reasonFor = (id: string, fallback: string) => (choice.reasons[id] ? fill(choice.reasons[id], session) : fallback);
   const mk = (id: string | undefined, kind: PickKind, forWhom: 'both' | PersonId, fallback: string) => {
     const e = id ? all.get(id) : undefined;
     return e ? toPick(e, kind, forWhom, reasonFor(e.id, fallback), pools) : undefined;
   };
 
-  const watch = mk(choice.watchId, 'watch', 'both', `Qloo found it from both your favourites together${tagLine ? `; you both lean ${tagLine}` : ''}.`);
-  const alsoWatch = choice.alsoIds.map((id) => mk(id, 'also', 'both', 'Another one from both your tastes together.')).filter(Boolean) as Pick[];
-  const listen = choice.listenIds.map((id) => mk(id, 'listen', 'both', `From ${bothLabel}'s tastes together.`)).filter(Boolean) as Pick[];
+  const watch = mk(choice.watchId, 'watch', 'both', jointReason(pools.fit.get(choice.watchId || ''), session, tagLine));
+  const alsoWatch = choice.alsoIds.map((id) => mk(id, 'also', 'both', jointReason(pools.fit.get(id), session))).filter(Boolean) as Pick[];
+  const listen = choice.listenIds.map((id) => mk(id, 'listen', 'both', jointReason(pools.fit.get(id), session))).filter(Boolean) as Pick[];
   const forA = mk(choice.forAId, 'swap', 'b', `From ${B.name}'s side: people who like ${favNames(B)[0] || 'their favourites'} also like this. For ${A.name} to try.`);
   const forB = mk(choice.forBId, 'swap', 'a', `From ${A.name}'s side: people who like ${favNames(A)[0] || 'their favourites'} also like this. For ${B.name} to try.`);
 

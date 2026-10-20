@@ -49,9 +49,9 @@ export function rateLimited(key: string, max = MAX_PER_WINDOW): number | null {
 export async function guarded(
   request: NextRequest,
   name: string,
-  run: () => Promise<NextResponse>,
+  run: () => Promise<Response>,
   opts: { bucket?: string; max?: number } = {}
-): Promise<NextResponse> {
+): Promise<Response> {
   const wait = rateLimited(`${opts.bucket || 'plan'}:${clientKey(request)}`, opts.max);
   if (wait !== null) {
     return NextResponse.json(
@@ -69,7 +69,13 @@ export async function guarded(
 }
 
 /** One log line per plan. No names or favourites: only what's needed to watch quality and speed. */
-export function logPlan(name: string, startedAt: number, plan: { planner: string; plannerModel?: string; qlooStatus: string; number: number; notices: string[] } | undefined, picks: number) {
+export function logPlan(
+  name: string,
+  startedAt: number,
+  plan: { planner: string; plannerModel?: string; qlooStatus: string; number: number; notices: string[]; trace?: { action: string; ms?: number }[] } | undefined,
+  picks: number
+) {
+  const at = (action: string) => plan?.trace?.find((t) => t.action === action)?.ms;
   console.log(
     JSON.stringify({
       event: name,
@@ -79,7 +85,10 @@ export function logPlan(name: string, startedAt: number, plan: { planner: string
       model: plan?.plannerModel,
       qloo: plan?.qlooStatus,
       picks,
-      notices: plan?.notices.length || 0
+      notices: plan?.notices.length || 0,
+      // Where the time went: when Qloo scoring finished, and when the AI was briefed.
+      scoredAtMs: at('qloo_score result'),
+      briefedAtMs: at('Agent briefed')
     })
   );
 }

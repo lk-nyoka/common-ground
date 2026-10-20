@@ -1,5 +1,5 @@
 /**
- * Back Then's planning agent (server-side only).
+ * Gentle visit planning agent (server-side only). Gentle visit began as "Back Then" during this hackathon.
  *
  * With GEMINI_API_KEY set, an LLM plans the visit by calling Qloo tools itself
  * (qloo_related, qloo_search), then chooses the kit and explains it. Without it, a
@@ -299,7 +299,7 @@ Untested Qloo discoveries already on the map (you may pick these too):
 ${untested || '- none'}`;
 }
 
-const SYSTEM = `You are Back Then's planning agent. You help a family plan a short (about 20 minute) visit with an older relative living with dementia. You do not know the person's name; write {name} wherever you would address or mention them.
+const SYSTEM = `You are the Gentle visit planning agent. You help a family plan a short (about 20 minute) visit with an older relative living with dementia. You do not know the person's name; write {name} wherever you would address or mention them.
 
 Your job:
 1. Use the tools to find culturally connected items with Qloo. Expand from the signals that have reached them. Lean toward domains that have worked; do not experiment in a domain that caused upset and never lit up.
@@ -469,7 +469,7 @@ export async function planVisit(input: CaregiverProfile): Promise<{ profile: Car
         writing = out.writing;
       } catch (err: any) {
         const msg = err?.message || String(err);
-        notices.push(`The LLM agent failed (${msg.slice(0, 160)}), so Back Then's rules planned this kit instead.`);
+        notices.push(`The LLM agent failed (${msg.slice(0, 160)}), so Gentle visit's rules planned this kit instead.`);
         st.add('guardrail', 'LLM agent failed', `${msg.slice(0, 200)}. Falling back to rules.`);
       }
     }
@@ -479,7 +479,7 @@ export async function planVisit(input: CaregiverProfile): Promise<{ profile: Car
   }
 
   if (planner === 'rules' && !llmIsConfigured()) {
-    notices.push('Planned by Back Then\'s rules. Add GEMINI_API_KEY to let the LLM agent choose and explain the kit.');
+    notices.push('Planned by Gentle visit\'s rules. Add GEMINI_API_KEY to let the LLM agent choose and explain the kit.');
   }
 
   // Candidates: new Qloo results first, then earlier untested discoveries.

@@ -21,7 +21,7 @@ function seed(
     name,
     domain,
     sourceSeed: name,
-    sourceReason: query ? 'Family memory. Back Then will look it up in Qloo.' : 'Family memory.',
+    sourceReason: query ? 'Family memory. Gentle visit will look it up in Qloo.' : 'Family memory.',
     status: 'worked',
     confidence: 'High',
     confidenceReason: 'Family favourite',

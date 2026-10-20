@@ -1,5 +1,5 @@
 /**
- * Back Then: Qloo vs an LLM alone, on the same seeds.
+ * Gentle visit: Qloo vs an LLM alone, on the same seeds.
  *
  * This script prints only what the APIs actually return. There is no pre-written
  * verdict: read the two columns and judge for yourself, then quote real examples

@@ -192,7 +192,7 @@ export function NewProfileModal({ isOpen, onClose, onCreateProfile }: NewProfile
           <div>
             <h3 className="font-serif text-2xl font-bold text-stone-900">Tell us a few things they loved</h3>
             <p className="text-xs text-stone-600 mt-1">
-              Back Then looks these up in Qloo, then its agent plans a 20-minute visit kit.
+              Gentle visit looks these up in Qloo, then its agent plans a 20-minute visit kit.
             </p>
 
             <div className="my-4 p-3.5 bg-stone-50 border border-stone-200 rounded-xl space-y-1 text-[11px] text-stone-600">

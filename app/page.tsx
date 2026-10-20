@@ -1,56 +1,123 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import type { AgentTraceStep } from '../lib/types';
 import type { Session, Verdict } from '../lib/cg/types';
 import { applyFeedback } from '../lib/cg/learn';
+import { decodeInvite, type Invite } from '../lib/cg/invite';
 import { Setup } from '../components/cg/Setup';
 import { PlanView } from '../components/cg/PlanView';
+import { Progress } from '../components/cg/Progress';
+import { Mark } from '../components/cg/ui';
 
-const KEY = 'common-ground-session-v1';
+const KEY = 'common-ground-session-v2';
+const TIMEOUT_MS = 75_000;
 
 interface Status {
   qloo: { keySet: boolean; savedResponses: number };
   llm: { configured: boolean; model: string | null };
 }
 
+/**
+ * POST and read the agent's steps as they stream in (newline-delimited JSON).
+ * Falls back to a plain JSON body if the response isn't a stream.
+ */
+async function planRequest(url: string, body: unknown, onStep: (s: AgentTraceStep) => void, signal: AbortSignal): Promise<Session> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
+    body: JSON.stringify(body),
+    signal
+  });
+  const type = res.headers.get('content-type') || '';
+  if (!type.includes('ndjson') || !res.body) {
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.session) throw new Error(data.error || 'The planner had a problem. Please try again.');
+    return data.session;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let session: Session | null = null;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (value) buffer += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (!line) continue;
+      let msg: any;
+      try {
+        msg = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (msg.type === 'step') onStep(msg.step);
+      else if (msg.type === 'done') session = msg.session;
+      else if (msg.type === 'error') throw new Error(msg.error);
+    }
+    if (done) break;
+  }
+  if (!session) throw new Error('The planner stopped before finishing. Please try again.');
+  return session;
+}
+
 export default function Home() {
   const [session, setSession] = useState<Session | null>(null);
   const [busy, setBusy] = useState(false);
+  const [steps, setSteps] = useState<AgentTraceStep[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
+  const [invite, setInvite] = useState<Invite | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(KEY);
-      if (raw) setSession(JSON.parse(raw));
-    } catch {
-      /* storage unavailable */
+    const inv = decodeInvite(window.location.hash);
+    if (inv) setInvite(inv);
+    else {
+      try {
+        const raw = sessionStorage.getItem(KEY);
+        if (raw) setSession(JSON.parse(raw));
+      } catch {
+        /* storage unavailable */
+      }
     }
+    setLoaded(true);
+    const onHash = () => {
+      const next = decodeInvite(window.location.hash);
+      if (next) {
+        setSession(null);
+        setInvite(next);
+      }
+    };
+    window.addEventListener('hashchange', onHash);
     fetch('/api/status')
       .then((r) => r.json())
       .then(setStatus)
       .catch(() => setStatus(null));
+    return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
   useEffect(() => {
+    if (!loaded) return;
     try {
       if (session) sessionStorage.setItem(KEY, JSON.stringify(session));
       else sessionStorage.removeItem(KEY);
     } catch {
-      /* storage unavailable */
+      /* storage unavailable or full */
     }
-  }, [session]);
+  }, [session, loaded]);
 
-  const call = async (url: string, body: unknown) => {
+  const call = useCallback(async (url: string, body: unknown) => {
     setBusy(true);
     setError(null);
+    setSteps([]);
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 75_000);
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
-      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.session) throw new Error(data.error || 'The planner had a problem. Please try again.');
-      setSession(data.session);
+      const next = await planRequest(url, body, (s) => setSteps((cur) => [...cur, s]), controller.signal);
+      setSession(next);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {
       setError(
@@ -58,15 +125,20 @@ export default function Home() {
           ? 'That took too long. Qloo or the AI planner may be busy. Please try again.'
           : typeof navigator !== 'undefined' && !navigator.onLine
           ? 'You seem to be offline. Check your connection and try again.'
-          : String(err?.message || err)
+          : String(err?.message || 'Something went wrong. Please try again.')
       );
     } finally {
       clearTimeout(timer);
       setBusy(false);
     }
-  };
+  }, []);
 
   const start = (s: Session) => {
+    if (invite) {
+      // The invite has done its job; drop it from the address bar so a refresh doesn't restart it.
+      history.replaceState(null, '', window.location.pathname);
+      setInvite(null);
+    }
     setSession(s);
     call('/api/cg/plan', { session: s });
   };
@@ -76,62 +148,85 @@ export default function Home() {
     setSession(applyFeedback(session, verdicts));
     call('/api/cg/feedback', { session, verdicts });
   };
+  const reset = () => {
+    if (busy) return;
+    setSession(null);
+    setError(null);
+  };
 
-  const qloo = status ? (status.qloo.keySet ? 'Qloo live' : status.qloo.savedResponses ? 'Qloo saved' : 'Qloo not connected') : '';
-  const agent = status?.llm.configured ? 'Gemini agent' : status ? 'Rules only' : '';
   const hasPlan = !!session?.plans.length;
+  const chip = status
+    ? [status.qloo.keySet ? 'Live Qloo data' : status.qloo.savedResponses ? 'Saved Qloo data' : 'Qloo not connected', status.llm.configured ? 'AI planner on' : 'Rules only']
+    : null;
 
   return (
     <main className="min-h-screen bg-paper text-ink">
-      <header className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4 sm:px-6">
-        <button type="button" onClick={() => !busy && setSession(null)} className="flex items-center gap-2" aria-label="Common Ground home">
-          <span className="relative h-6 w-9" aria-hidden>
-            <span className="absolute left-0 top-0 h-6 w-6 rounded-full bg-personA/90 mix-blend-multiply" />
-            <span className="absolute right-0 top-0 h-6 w-6 rounded-full bg-personB/90 mix-blend-multiply" />
-          </span>
-          <span className="font-display text-lg">Common Ground</span>
+      <a href="#content" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-full focus:bg-card focus:px-4 focus:py-2">
+        Skip to content
+      </a>
+      <header className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-4 sm:px-6">
+        <button type="button" onClick={reset} className="flex min-h-[44px] items-center gap-2" aria-label="Common Ground, start over">
+          <Mark size={22} />
+          <span className="font-display text-lg font-semibold">Common Ground</span>
         </button>
-        {status && (
-          <span className="rounded-full border border-line bg-card px-2.5 py-1 text-[11px] text-muted" title="What this deployment is connected to">
-            <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${status.qloo.keySet ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-            {qloo} · {agent}
-          </span>
+        {chip && (
+          <p className="flex items-center gap-1.5 text-right text-xs text-muted" title="What this site is connected to">
+            <span className={`inline-block h-2 w-2 rounded-full ${status!.qloo.keySet ? 'bg-emerald-600' : 'bg-amber-500'}`} aria-hidden />
+            <span>
+              {chip[0]}
+              <span className="hidden sm:inline">, {chip[1].toLowerCase()}</span>
+            </span>
+          </p>
         )}
       </header>
 
-      <div className="mx-auto max-w-3xl px-4 pb-16 sm:px-6">
+      <div id="content" className="mx-auto max-w-3xl px-4 pb-16 sm:px-6">
         {error && (
-          <div role="alert" className="mb-4 rounded-xl border border-accent/30 bg-accent/5 px-4 py-3 text-sm">
-            {error}{' '}
+          <div role="alert" className="mb-5 rounded-2xl border border-danger/30 bg-card px-4 py-3 text-sm">
+            <p>{error}</p>
             {session && !busy && (
-              <button type="button" className="underline" onClick={() => call('/api/cg/plan', { session })}>
+              <button type="button" className="mt-2 min-h-[40px] font-semibold text-shared-ink underline underline-offset-2" onClick={() => call('/api/cg/plan', { session })}>
                 Try again
               </button>
             )}
           </div>
         )}
 
-        {busy && !hasPlan ? (
-          <div className="flex flex-col items-center py-24 text-center">
-            <span className="relative mb-6 h-12 w-20" aria-hidden>
-              <span className="absolute left-0 top-0 h-12 w-12 animate-pulse rounded-full bg-personA/80 mix-blend-multiply" />
-              <span className="absolute right-0 top-0 h-12 w-12 animate-pulse rounded-full bg-personB/80 mix-blend-multiply [animation-delay:300ms]" />
-            </span>
-            <p className="font-display text-2xl">Looking for your common ground…</p>
-            <p className="mt-2 max-w-sm text-sm text-muted">Matching favourites in Qloo, comparing your tastes, then planning the night. Usually 10–30 seconds.</p>
-          </div>
+        {!loaded ? null : busy && !hasPlan ? (
+          <Progress steps={steps} />
         ) : hasPlan && session ? (
-          <PlanView key={session.plans[0].id} session={session} busy={busy} onFeedback={feedback} onReset={() => setSession(null)} />
+          <>
+            {busy && (
+              <div className="mb-4 rounded-2xl border border-shared/30 bg-shared-soft px-4 py-3 text-sm text-shared-ink" role="status" aria-live="polite">
+                Planning your next night… {steps.length ? `(${steps.length} steps so far)` : ''}
+              </div>
+            )}
+            <PlanView key={session.plans[0].id} session={session} busy={busy} onFeedback={feedback} onReset={reset} />
+          </>
         ) : (
-          <Setup onStart={start} busy={busy} initial={session} />
+          <Setup key={invite ? 'invite' : 'setup'} onStart={start} busy={busy} initial={session} invite={invite} />
         )}
 
-        <footer className="mt-16 border-t border-line pt-6 text-center text-xs text-muted">
+        <footer className="mt-16 space-y-2 border-t border-line pt-6 text-sm text-muted">
           <p>
-            Recommendations from <a className="underline" href="https://www.qloo.com" target="_blank" rel="noreferrer">Qloo</a>’s taste graph. Nothing is invented: every pick is a Qloo result, and the agent’s steps are shown with each plan.
+            Recommendations come from{' '}
+            <a className="underline underline-offset-2" href="https://www.qloo.com" target="_blank" rel="noreferrer">
+              Qloo
+            </a>
+            ’s taste graph. Every pick is a Qloo result, and each plan shows the agent’s steps.
           </p>
-          <p className="mt-2">
-            Visiting someone with dementia? Try <a className="underline" href="/gentle">Gentle visit</a>.
+          <p>
+            Planning a visit to someone living with dementia?{' '}
+            <a className="underline underline-offset-2" href="/gentle">
+              Try Gentle visit
+            </a>{' '}
+            (experimental).
+          </p>
+          <p>
+            <a className="underline underline-offset-2" href="https://github.com/lk-nyoka/common-ground" target="_blank" rel="noreferrer">
+              Source code
+            </a>{' '}
+            under the MIT licence.
           </p>
         </footer>
       </div>

@@ -54,6 +54,7 @@ export interface AgentTraceStep {
   type: 'thought' | 'tool_call' | 'tool_result' | 'guardrail' | 'synthesis';
   action: string;
   details: string;
+  ms?: number; // milliseconds since planning started
 }
 
 export type QlooStatus = 'live' | 'saved' | 'not_connected' | 'error';
@@ -141,6 +142,9 @@ export interface QlooEntity {
   description?: string;
   popularity?: number;
   affinity?: number;
+  durationMinutes?: number; // films: running time; TV: typical episode length
+  /** With feature.explainability: how much each input entity contributed to this result (sums to ~1). */
+  explain?: Record<string, number>;
 }
 
 export interface QlooResult<T> {

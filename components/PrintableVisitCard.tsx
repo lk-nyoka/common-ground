@@ -158,7 +158,7 @@ export function PrintableVisitCard({ kit, profile, isOpen, onClose }: PrintableV
 
           {/* Footer */}
           <div className="border-t border-stone-300 pt-2 text-[10px] text-stone-500 flex items-center justify-between">
-            <span>Back Then · Built for Dementia Caregiver Connection</span>
+            <span>Gentle visit, by Common Ground</span>
             <span>No medical claims · Dignity-first care logic</span>
           </div>
         </div>
