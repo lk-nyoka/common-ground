@@ -12,8 +12,31 @@ export function person(id: 'a' | 'b', name: string, favourites: Favourite[]): Pe
   return { id, name, favourites, liked: [] };
 }
 
-export function newSession(a: Person, b: Person, minutes = 120, exclusions: string[] = [], isSample = false): Session {
-  return { id: uid('s'), isSample, people: [a, b], minutes, exclusions, plans: [], feedback: [], seen: [], rejected: [], tally: {} };
+export const DEFAULT_CITY = 'Johannesburg, South Africa';
+
+export function newSession(
+  a: Person,
+  b: Person,
+  minutes = 120,
+  exclusions: string[] = [],
+  isSample = false,
+  opts: { city?: string; country?: string; includeLocal?: boolean } = {}
+): Session {
+  return {
+    id: uid('s'),
+    isSample,
+    people: [a, b],
+    minutes,
+    exclusions,
+    city: opts.city || DEFAULT_CITY,
+    country: opts.country || 'za',
+    includeLocal: opts.includeLocal ?? true,
+    plans: [],
+    feedback: [],
+    seen: [],
+    rejected: [],
+    tally: {}
+  };
 }
 
 export interface SamplePair {

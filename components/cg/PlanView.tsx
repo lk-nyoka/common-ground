@@ -7,6 +7,11 @@ import { picksOf, sharedHitRate, summarise } from '../../lib/cg/learn';
 import { Venn } from './Venn';
 import { FitProof } from './FitProof';
 import { Art, minutesLabel, typeLabel } from './ui';
+import { LinkRow, linksFor, Ratings, SpotifyPlayer } from './Links';
+import { StoryViewer } from './Stories';
+import { Sparkles, Users } from 'lucide-react';
+import { roomItemsFrom } from '../../lib/cg/room-items';
+import { DropsEntry } from './DropsEntry';
 
 function meta(p: Pick) {
   const bits: string[] = [typeLabel(p.type)];
@@ -52,7 +57,9 @@ function PickBlock({
   setVerdict,
   names,
   hero,
-  rate
+  rate,
+  country,
+  city
 }: {
   pick: Pick;
   verdict?: Verdict;
@@ -60,6 +67,8 @@ function PickBlock({
   names: [string, string];
   hero?: boolean;
   rate: boolean;
+  country: string;
+  city?: string;
 }) {
   return (
     <article>
@@ -67,22 +76,20 @@ function PickBlock({
         <Art src={pick.image} type={pick.type} className={hero ? 'h-40 w-[6.75rem] shrink-0 rounded-xl sm:h-56 sm:w-[9.5rem]' : 'h-16 w-16 shrink-0 rounded-xl'} />
         <div className="min-w-0 flex-1">
           <h3 className={hero ? 'text-2xl font-semibold leading-tight sm:text-3xl' : 'text-[17px] font-semibold leading-snug'}>{pick.name}</h3>
-          <p className="mt-1 text-[13px] text-muted">{meta(pick)}</p>
+          <p className="mt-1 text-[13px] text-muted">
+            {meta(pick)}
+            {pick.local ? ', South African' : ''}
+          </p>
+          <Ratings pick={pick} />
           <p className="mt-2 text-[15px] leading-relaxed">{pick.reason}</p>
         </div>
       </div>
       <FitProof pick={pick} names={names} />
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]">
-        {pick.link && (
-          <a href={pick.link.url} target="_blank" rel="noreferrer" className="inline-flex min-h-[36px] items-center gap-1 font-medium text-shared-ink underline-offset-2 hover:underline">
-            {pick.link.label}
-            <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
-          </a>
-        )}
-        <span className="text-muted" title={pick.provenance === 'qloo_saved' && pick.capturedAt ? `Saved ${pick.capturedAt.slice(0, 10)}` : undefined}>
-          {pick.provenance === 'qloo_live' ? 'From Qloo just now' : 'From a saved Qloo response'}
-        </span>
-      </div>
+      {pick.type.includes('artist') && <SpotifyPlayer spotifyId={pick.external?.spotifyId} name={pick.name} />}
+      <LinkRow links={linksFor(pick, country, city)} />
+      <p className="mt-2 text-[12px] text-muted" title={pick.provenance === 'qloo_saved' && pick.capturedAt ? `Saved ${pick.capturedAt.slice(0, 10)}` : undefined}>
+        {pick.provenance === 'qloo_live' ? 'From Qloo just now' : 'From a saved Qloo response'}
+      </p>
       {rate && <VerdictButtons pick={pick} value={verdict} onChange={setVerdict} names={names} />}
     </article>
   );
@@ -187,6 +194,27 @@ export function PlanView({
   const names: [string, string] = [A.name, B.name];
   const [verdicts, setVerdicts] = useState<Record<string, Verdict>>({});
   const [rating, setRating] = useState(false);
+  const [story, setStory] = useState(false);
+  const [roomBusy, setRoomBusy] = useState(false);
+  const [roomError, setRoomError] = useState<string | null>(null);
+  const openRoom = async () => {
+    if (!plan) return;
+    setRoomBusy(true);
+    setRoomError(null);
+    try {
+      const res = await fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ names, items: roomItemsFrom(plan) })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.id) throw new Error(j.error || 'Couldn’t open a room. Try again.');
+      window.location.href = `/room/${j.id}`;
+    } catch (e: any) {
+      setRoomError(e.message);
+      setRoomBusy(false);
+    }
+  };
   const picks = useMemo(() => (plan ? picksOf(plan) : []), [plan]);
   const set = (id: string) => (v?: Verdict) =>
     setVerdicts((cur) => {
@@ -198,7 +226,9 @@ export function PlanView({
   if (!plan) return null;
   const rated = Object.keys(verdicts).length;
   const unmatched = session.people.flatMap((p) => p.favourites.filter((f) => f.unmatched).map((f) => `${f.query} (${p.name})`));
-  const block = (p: Pick, hero = false) => <PickBlock key={p.id} pick={p} verdict={verdicts[p.id]} setVerdict={set(p.id)} names={names} hero={hero} rate={rating} />;
+  const block = (p: Pick, hero = false) => (
+    <PickBlock key={p.id} pick={p} verdict={verdicts[p.id]} setVerdict={set(p.id)} names={names} hero={hero} rate={rating} country={session.country || 'za'} city={plan.city || session.city} />
+  );
 
   return (
     <div className="space-y-5">
@@ -224,6 +254,41 @@ export function PlanView({
       {session.feedback.length > 0 && <Learning session={session} />}
 
       <Venn session={session} plan={plan} />
+
+      {picks.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setStory(true)}
+          className="flex w-full items-center justify-between gap-3 rounded-3xl bg-ink px-5 py-4 text-left text-white transition hover:bg-ink/90"
+        >
+          <span>
+            <span className="block font-display text-lg font-semibold">Play our story</span>
+            <span className="block text-sm text-white/70">Tonight as shareable story cards, ready for WhatsApp or Instagram</span>
+          </span>
+          <Sparkles className="h-6 w-6 shrink-0" aria-hidden />
+        </button>
+      )}
+      {picks.length > 1 && (
+        <button
+          type="button"
+          onClick={openRoom}
+          disabled={roomBusy}
+          className="flex w-full items-center justify-between gap-3 rounded-3xl bg-shared px-5 py-4 text-left text-white transition hover:bg-shared-ink disabled:opacity-70"
+        >
+          <span>
+            <span className="block font-display text-lg font-semibold">{roomBusy ? 'Opening a room…' : 'Swipe together, live'}</span>
+            <span className="block text-sm text-white/80">Each of you swipes on your own phone. Match, then watch or listen at the same moment.</span>
+          </span>
+          <Users className="h-6 w-6 shrink-0" aria-hidden />
+        </button>
+      )}
+      {picks.length > 0 && <DropsEntry session={session} />}
+      {roomError && (
+        <p className="rounded-2xl bg-a-soft px-4 py-2 text-sm text-a-ink" role="alert">
+          {roomError}
+        </p>
+      )}
+      {story && <StoryViewer session={session} plan={plan} onClose={() => setStory(false)} />}
 
       {picks.length > 0 && (
         <section className="px-1">
@@ -256,6 +321,16 @@ export function PlanView({
         </section>
       )}
 
+      {plan.local?.length > 0 && (
+        <section className="rounded-3xl border border-line bg-card p-5 sm:p-6" aria-labelledby="local-title">
+          <h2 id="local-title" className="text-lg font-semibold">
+            Your Mzansi match
+          </h2>
+          <p className="mb-4 mt-1 text-sm text-muted">South African artists Qloo ranks for both of your tastes.</p>
+          <div className="space-y-6">{plan.local.map((p) => block(p))}</div>
+        </section>
+      )}
+
       {(plan.swap.forA || plan.swap.forB) && (
         <section aria-labelledby="swap-title">
           <h2 id="swap-title" className="mb-3 px-1 text-lg font-semibold">
@@ -276,6 +351,41 @@ export function PlanView({
               ) : null
             )}
           </div>
+        </section>
+      )}
+
+      {plan.venues?.length > 0 && (
+        <section className="rounded-3xl border border-line bg-card p-5 sm:p-6" aria-labelledby="venues-title">
+          <h2 id="venues-title" className="text-lg font-semibold">
+            Going out instead?
+          </h2>
+          <p className="mb-4 mt-1 text-sm text-muted">
+            Live-music venues in {(plan.city || session.city || '').split(',')[0]} that Qloo ranks for both of your tastes. Location matters more than taste for places, so treat these as a starting point.
+          </p>
+          <ul className="grid gap-3 sm:grid-cols-2">
+            {plan.venues.map((v) => (
+              <li key={v.id} className="flex gap-3 rounded-2xl border border-line p-3">
+                <Art src={v.image} type="urn:entity:place" className="h-16 w-16 shrink-0 rounded-xl" />
+                <div className="min-w-0">
+                  <p className="font-semibold leading-snug">{v.name}</p>
+                  {v.address && <p className="mt-0.5 text-[13px] text-muted">{v.address}</p>}
+                  <div className="mt-1.5 flex flex-wrap gap-x-3 text-[13px] font-medium">
+                    <a className="text-shared-ink underline underline-offset-2" target="_blank" rel="noreferrer" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${v.name} ${v.address || ''}`)}`}>
+                      Directions
+                    </a>
+                    {v.website && (
+                      <a className="text-shared-ink underline underline-offset-2" target="_blank" rel="noreferrer" href={v.website}>
+                        Website
+                      </a>
+                    )}
+                    <a className="text-shared-ink underline underline-offset-2" target="_blank" rel="noreferrer" href={`https://www.google.com/search?q=${encodeURIComponent(`${v.name} events this week`)}`}>
+                      What’s on
+                    </a>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 

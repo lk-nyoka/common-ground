@@ -143,8 +143,33 @@ export interface QlooEntity {
   popularity?: number;
   affinity?: number;
   durationMinutes?: number; // films: running time; TV: typical episode length
+  /** Ids and ratings Qloo links to the entity (Spotify, Netflix, IMDb...). */
+  external?: QlooExternal;
+  /** Places only. */
+  place?: QlooPlace;
   /** With feature.explainability: how much each input entity contributed to this result (sums to ~1). */
   explain?: Record<string, number>;
+}
+
+export interface QlooExternal {
+  spotifyId?: string;
+  netflixId?: string;
+  imdbId?: string;
+  imdbRating?: number;
+  letterboxdId?: string;
+  rottenTomatoes?: number;
+  metacritic?: number;
+}
+
+export interface QlooPlace {
+  address?: string;
+  website?: string;
+  neighborhood?: string;
+  city?: string;
+  lat?: number;
+  lng?: number;
+  priceLevel?: number;
+  liveMusic?: boolean;
 }
 
 export interface QlooResult<T> {

@@ -31,12 +31,13 @@ const SEARCH: Record<string, any> = {
 };
 
 let calls: { url: string; body?: string }[] = [];
+let lastPlaceQuery = '';
 
 /** Per-person affinity the fake Qloo returns for filter.results.entities (signal -> id -> score). */
 let AFF: Record<string, Record<string, number>> = {};
 const DEFAULT_AFF = (): Record<string, Record<string, number>> => ({
-  'ART-MET': { 'MOV-1': 0.95, 'MOV-3': 0.8, 'MOV-5': 0.85, 'TV-1': 0.7, 'ART-1': 0.6, 'ART-2': 0.95, 'ART-3': 0.5, 'ART-4': 0.9, 'ART-8': 0.7, 'ART-11': 0.3 },
-  'ART-TS': { 'MOV-1': 0.4, 'MOV-3': 0.85, 'MOV-5': 0.7, 'TV-1': 0.75, 'ART-1': 0.9, 'ART-2': 0.4, 'ART-3': 0.95, 'ART-4': 0.45, 'ART-9': 0.65, 'ART-12': 0.2 }
+  'ART-MET': { 'ART-SA1': 0.7, 'ART-SA2': 0.4, 'ART-SA3': 0.65, 'MOV-1': 0.95, 'MOV-3': 0.8, 'MOV-5': 0.85, 'TV-1': 0.7, 'ART-1': 0.6, 'ART-2': 0.95, 'ART-3': 0.5, 'ART-4': 0.9, 'ART-8': 0.7, 'ART-11': 0.3 },
+  'ART-TS': { 'ART-SA1': 0.6, 'ART-SA2': 0.9, 'ART-SA3': 0.62, 'MOV-1': 0.4, 'MOV-3': 0.85, 'MOV-5': 0.7, 'TV-1': 0.75, 'ART-1': 0.9, 'ART-2': 0.4, 'ART-3': 0.95, 'ART-4': 0.45, 'ART-9': 0.65, 'ART-12': 0.2 }
 });
 let gemini: ((body: any) => any) | null = null;
 
@@ -67,6 +68,13 @@ function installFetch() {
         const ids = (u.searchParams.get('filter.results.entities') || '').split(',');
         const table = AFF[signal] || {};
         return json({ success: true, results: { entities: ids.map((id) => ({ ...ent(id, id, type), query: { affinity: table[id] ?? 0.5 } })) } });
+      }
+      if (u.pathname === '/v2/insights' && u.searchParams.get('filter.tags') === 'urn:tag:genre:music:south_africa') {
+        return json({ success: true, results: { entities: [ent('ART-SA1', 'Nasty C', 'urn:entity:artist', ['South Africa']), ent('ART-SA2', 'Tyla', 'urn:entity:artist', ['South Africa']), ent('ART-SA3', 'Master KG', 'urn:entity:artist', ['South Africa'])] } });
+      }
+      if (u.pathname === '/v2/insights' && u.searchParams.get('filter.type') === 'urn:entity:place') {
+        lastPlaceQuery = u.searchParams.get('filter.location.query') || '';
+        return json({ success: true, results: { entities: [{ ...ent('PLACE-1', 'Social On Main', 'urn:entity:place', ['Live music']), properties: { address: '1 Main Rd, Bryanston', website: 'https://example.com', images: [{ url: 'https://images.qloo.com/i/x.jpg' }] } }] } });
       }
       if (u.pathname === '/v2/insights') {
         const type = u.searchParams.get('filter.type') || '';
@@ -354,4 +362,26 @@ test('study results encode without names and summarise per method', () => {
   assert.equal(s.llm.vetoed, 1);
   assert.equal(s.qloo.worstOffScore, (1 + 0.5) / 2);
   assert.equal(decodeResult('garbage'), null);
+});
+
+// ---------- South African picks and venues ----------
+
+test('South African lane: SA artists ranked fairly for both, plus venues in their city', async () => {
+  const s = await planNight(sample());
+  const plan = s.plans[0];
+  assert.ok(plan.local.length >= 2, 'has South African picks');
+  assert.ok(plan.local.every((p) => p.kind === 'local' && p.local === true));
+  // Nasty C (0.7/0.6) and Master KG (0.65/0.62) suit both; Tyla (0.4/0.9) is one-sided, so it ranks last.
+  assert.equal(plan.local[plan.local.length - 1].name, 'Tyla');
+  assert.equal(plan.venues[0]?.name, 'Social On Main');
+  assert.equal(lastPlaceQuery, 'Johannesburg, South Africa');
+  assert.ok(plan.venues[0].image?.startsWith('https://images.qloo.com/'));
+});
+
+test('South African lane can be switched off', async () => {
+  const sess = sample();
+  sess.includeLocal = false;
+  const s = await planNight(sess);
+  assert.equal(s.plans[0].local.length, 0);
+  assert.ok(!calls.some((c) => c.url.includes('south_africa')));
 });

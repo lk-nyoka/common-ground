@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Check, Copy, Link2, Loader2, Plus, X } from 'lucide-react';
 import type { FavouriteType, Person, Session } from '../../lib/cg/types';
-import { fav, newSession, person, SAMPLE_PAIRS } from '../../lib/cg/samples';
+import { DEFAULT_CITY, fav, newSession, person, SAMPLE_PAIRS } from '../../lib/cg/samples';
 import { namesMatch } from '../../lib/cg/match';
 import { type Invite, inviteUrl } from '../../lib/cg/invite';
 import { Art, Mark, minutesLabel } from './ui';
@@ -14,6 +14,16 @@ const TYPES: { id: FavouriteType; label: string; example: [string, string] }[] =
   { id: 'urn:entity:tv_show', label: 'TV', example: ['A show, e.g. Abbott Elementary', "A show, e.g. Grey's Anatomy"] }
 ];
 const MINUTES = [45, 90, 120, 180];
+const COUNTRIES: { code: string; label: string }[] = [
+  { code: 'za', label: 'South Africa' },
+  { code: 'ng', label: 'Nigeria' },
+  { code: 'ke', label: 'Kenya' },
+  { code: 'gb', label: 'United Kingdom' },
+  { code: 'us', label: 'United States' },
+  { code: 'ca', label: 'Canada' },
+  { code: 'au', label: 'Australia' },
+  { code: 'in', label: 'India' }
+];
 const MAX_FAVS = 3;
 
 type Check =
@@ -273,6 +283,9 @@ export function Setup({
   const [b, setB] = useState<Draft>(() => (invite ? { name: invite.toName, favs: [blankFav()] } : fromPerson(keep?.people[1])));
   const [minutes, setMinutes] = useState(invite?.minutes || keep?.minutes || 120);
   const [avoid, setAvoid] = useState(invite?.avoid.join(', ') || keep?.exclusions.join(', ') || '');
+  const [city, setCity] = useState(keep?.city || DEFAULT_CITY);
+  const [country, setCountry] = useState(keep?.country || 'za');
+  const [includeLocal, setIncludeLocal] = useState(keep?.includeLocal ?? true);
 
   // If the page receives an invite after first render (hash change), adopt it.
   useEffect(() => {
@@ -363,6 +376,27 @@ export function Setup({
           <span className="text-sm font-medium">Anything to avoid? (optional)</span>
           <input value={avoid} onChange={(e) => setAvoid(e.target.value)} placeholder="e.g. horror, war" className="field mt-2" maxLength={80} />
         </label>
+        <label className="block">
+          <span className="text-sm font-medium">Your city (for venues near you)</span>
+          <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. Johannesburg, South Africa" className="field mt-2" maxLength={80} autoComplete="address-level2" />
+        </label>
+        <label className="block">
+          <span className="text-sm font-medium">Streaming country</span>
+          <select value={country} onChange={(e) => setCountry(e.target.value)} className="field mt-2">
+            {COUNTRIES.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex min-h-[44px] items-center gap-3 sm:col-span-2">
+          <input type="checkbox" checked={includeLocal} onChange={(e) => setIncludeLocal(e.target.checked)} className="h-5 w-5 accent-[#6F42C1]" />
+          <span className="text-sm">
+            <span className="font-medium">Include South African picks</span>
+            <span className="text-muted"> (a Mzansi match for both of you)</span>
+          </span>
+        </label>
       </section>
 
       {!invite && <InvitePanel a={a} bName={b.name} minutes={minutes} avoid={avoid} />}
@@ -371,7 +405,11 @@ export function Setup({
         <button
           type="button"
           disabled={!ready || busy}
-          onClick={() => onStart(newSession(toPerson('a', a), toPerson('b', b), minutes, avoid.split(',').map((s) => s.trim()).filter(Boolean)))}
+          onClick={() =>
+            onStart(
+              newSession(toPerson('a', a), toPerson('b', b), minutes, avoid.split(',').map((s) => s.trim()).filter(Boolean), false, { city: city.trim(), country, includeLocal })
+            )
+          }
           className="btn-primary w-full sm:w-auto"
         >
           Plan our night

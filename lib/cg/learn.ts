@@ -2,7 +2,7 @@
 import type { KindTally, Pick, PickKind, PlanFeedback, Session, Verdict } from './types';
 
 export function picksOf(plan: Session['plans'][number]): Pick[] {
-  return [plan.watch, ...plan.alsoWatch, ...plan.listen, plan.swap.forA, plan.swap.forB].filter(Boolean) as Pick[];
+  return [plan.watch, ...plan.alsoWatch, ...plan.listen, plan.swap.forA, plan.swap.forB, ...(plan.local || [])].filter(Boolean) as Pick[];
 }
 
 /**

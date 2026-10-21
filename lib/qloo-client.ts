@@ -212,6 +212,42 @@ function normaliseEntity(e: any, fallbackType?: string): QlooEntity | null {
       )
     : undefined;
   const duration = typeof props.duration === 'number' && props.duration > 0 && props.duration < 1000 ? Math.round(props.duration) : undefined;
+  const ext = e.external && typeof e.external === 'object' ? e.external : {};
+  const first = (k: string): any => (Array.isArray(ext[k]) ? ext[k][0] : undefined);
+  const idOf = (k: string, re: RegExp) => {
+    const v = first(k)?.id;
+    return typeof v === 'string' && re.test(v) ? v : undefined;
+  };
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
+  // Spotify can list several ids for one artist; the one with the most listeners is the real profile.
+  const spotify = Array.isArray(ext.spotify)
+    ? [...ext.spotify].sort((x: any, y: any) => (y?.monthly_listeners || 0) - (x?.monthly_listeners || 0))[0]
+    : undefined;
+  const external = {
+    spotifyId: typeof spotify?.id === 'string' && /^[A-Za-z0-9]{22}$/.test(spotify.id) ? spotify.id : undefined,
+    netflixId: idOf('netflix', /^\d{4,12}$/),
+    imdbId: idOf('imdb', /^(tt|nm)\d{5,10}$/),
+    imdbRating: num(first('imdb')?.user_rating),
+    letterboxdId: idOf('letterboxd', /^[a-z0-9-]{1,80}$/),
+    rottenTomatoes: num(first('rottentomatoes')?.critic_rating),
+    metacritic: num(first('metacritic')?.critic_rating)
+  };
+  const hasExternal = Object.values(external).some((v) => v !== undefined);
+  const geo = props.geocode || {};
+  const place =
+    typeof props.address === 'string' || typeof props.website === 'string'
+      ? {
+          address: typeof props.address === 'string' ? props.address.slice(0, 200) : undefined,
+          website: typeof props.website === 'string' && /^https?:\/\//.test(props.website) ? props.website.slice(0, 300) : undefined,
+          neighborhood: typeof props.neighborhood === 'string' ? props.neighborhood : undefined,
+          city: typeof geo.city === 'string' ? geo.city : undefined,
+          lat: num(e.location?.lat),
+          lng: typeof e.location?.lon === 'number' ? e.location.lon : typeof e.location?.lng === 'number' ? e.location.lng : undefined,
+          priceLevel: num(props.price_level),
+          liveMusic: props.live_music === true
+        }
+      : undefined;
+  const placeImage = Array.isArray(props.images) && typeof props.images[0]?.url === 'string' ? props.images[0].url : undefined;
   return {
     id: String(id),
     name: String(name),
@@ -219,13 +255,15 @@ function normaliseEntity(e: any, fallbackType?: string): QlooEntity | null {
     year,
     activeFrom: toYear(props.start_year),
     activeTo: toYear(props.end_year),
-    image: typeof props.image?.url === 'string' ? props.image.url : undefined,
+    image: typeof props.image?.url === 'string' ? props.image.url : placeImage,
     tags: Array.isArray(e.tags) ? e.tags.map((t: any) => t?.name).filter(Boolean) : undefined,
     contentRating: typeof props.content_rating === 'string' ? props.content_rating : undefined,
     description: props.short_description || props.description || e.disambiguation || undefined,
     popularity: typeof e.popularity === 'number' ? e.popularity : undefined,
     affinity,
     durationMinutes: duration,
+    external: hasExternal ? external : undefined,
+    place,
     explain: explain && Object.keys(explain).length ? explain : undefined
   };
 }
@@ -263,7 +301,7 @@ let yearFilterRejected = false;
 export async function qlooRelated(
   entityId: string,
   targetType: string,
-  opts: { take?: number; maxYear?: number; explain?: boolean } = {}
+  opts: { take?: number; maxYear?: number; explain?: boolean; tags?: string; locationQuery?: string } = {}
 ): Promise<QlooResult<QlooEntity[]> & { yearFilterApplied: boolean }> {
   const take = opts.take ?? 8;
   const base: Record<string, string> = {
@@ -273,6 +311,8 @@ export async function qlooRelated(
   };
   // Per-result contribution of each input entity (verified on the hackathon API, Oct 2026).
   if (opts.explain) base['feature.explainability'] = 'true';
+  if (opts.tags && /^urn:tag:[a-z0-9_:]+$/.test(opts.tags)) base['filter.tags'] = opts.tags;
+  if (opts.locationQuery) base['filter.location.query'] = opts.locationQuery.slice(0, 80);
 
   const yearCapable = targetType === 'urn:entity:movie' || targetType === 'urn:entity:tv_show';
   if (yearCapable && opts.maxYear && !yearFilterRejected) {

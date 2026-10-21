@@ -1,7 +1,8 @@
 /** @type {import('next').NextConfig} */
 
 // Production-only Content Security Policy. Next.js needs inline scripts for hydration;
-// images come from Qloo's CDN (https), fonts from Google Fonts. The app calls only its own API.
+// images come from Qloo's CDN (https), fonts from Google Fonts. The app calls only its own API;
+// the only embedded frame is Spotify's player.
 const csp = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'",
@@ -9,6 +10,10 @@ const csp = [
   "font-src 'self' https://fonts.gstatic.com",
   "img-src 'self' https: data:",
   "connect-src 'self'",
+  // Spotify's player, embedded on music picks.
+  "frame-src https://open.spotify.com",
+  "worker-src 'self'",
+  "manifest-src 'self'",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'"
@@ -29,7 +34,7 @@ const nextConfig = {
     if (process.env.NODE_ENV !== 'production') return [];
     return [
       { source: '/(.*)', headers: [...securityHeaders, { key: 'Content-Security-Policy', value: csp }] },
-      { source: '/api/(.*)', headers: [{ key: 'Cache-Control', value: 'no-store' }] }
+      { source: '/api/:path((?!img).*)', headers: [{ key: 'Cache-Control', value: 'no-store' }] }
     ];
   },
   experimental: {

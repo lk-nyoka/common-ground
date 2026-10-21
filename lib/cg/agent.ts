@@ -13,7 +13,7 @@ import type { AgentTraceStep, QlooEntity, QlooStatus } from '../types';
 import { qlooCompare, qlooKeyIsSet, qlooRelated, qlooScore, qlooSearch, savedFixtureCount } from '../qloo-client';
 import { extractJson, FunctionDeclaration, GeminiContent, GeminiPart, geminiGenerate, llmIsConfigured, modelOf } from '../llm';
 import { fold, namesMatch } from './match';
-import type { Favourite, Person, PersonFit, PersonId, Pick, PickFit, PickKind, Plan, Session, SharedTag } from './types';
+import type { Favourite, Person, PersonFit, PersonId, Pick, PickFit, PickKind, Plan, Session, SharedTag, Venue } from './types';
 
 type Source = 'live' | 'saved' | 'unavailable';
 
@@ -122,9 +122,15 @@ interface Pools {
   artists: QlooEntity[]; // from both together
   aWorld: QlooEntity[]; // artists from A's side
   bWorld: QlooEntity[]; // artists from B's side
+  local: QlooEntity[]; // South African artists for both tastes (Qloo's South Africa music tag)
+  venues: QlooEntity[]; // live-music venues in the pair's city
   sourceOf: Map<string, { source: Source; capturedAt?: string }>;
   fit: Map<string, PickFit>; // Qloo evidence per candidate id
 }
+
+/** Qloo tags verified on the hackathon API (Oct 2026). */
+export const SA_MUSIC_TAG = 'urn:tag:genre:music:south_africa';
+export const LIVE_VENUE_TAG = 'urn:tag:category:place:live_music_venue';
 
 async function related(
   run: Run,
@@ -134,9 +140,9 @@ async function related(
   type: string,
   take: number,
   pools: Pools,
-  opts: { explain?: boolean } = {}
+  opts: { explain?: boolean; tags?: string; locationQuery?: string } = {}
 ) {
-  const res = await qlooRelated(ids.join(','), type, { take, explain: opts.explain });
+  const res = await qlooRelated(ids.join(','), type, { take, explain: opts.explain, tags: opts.tags, locationQuery: opts.locationQuery });
   run.note(res.source, res.capturedAt, res.error);
   run.add('tool_call', 'qloo_related', `qloo_related(from=${label}, target_type="${type}")`);
   if (res.source === 'unavailable') {
@@ -289,6 +295,8 @@ function toPick(e: QlooEntity, kind: PickKind, forWhom: 'both' | PersonId, reaso
     affinity: e.affinity,
     durationMinutes: e.durationMinutes,
     fit: pools.fit.get(e.id),
+    external: e.external,
+    local: pools.local.some((x) => x.id === e.id) || undefined,
     provenance: src.source === 'saved' ? 'qloo_saved' : 'qloo_live',
     capturedAt: src.source === 'saved' ? src.capturedAt : undefined,
     link: linkFor(e.name, e.type)
@@ -592,7 +600,7 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
 
   const aSig = signalsOf(A);
   const bSig = signalsOf(B);
-  const pools: Pools = { movies: [], tv: [], artists: [], aWorld: [], bWorld: [], sourceOf: new Map(), fit: new Map() };
+  const pools: Pools = { movies: [], tv: [], artists: [], aWorld: [], bWorld: [], local: [], venues: [], sourceOf: new Map(), fit: new Map() };
   let tags: SharedTag[] = [];
 
   if (aSig.length && bSig.length) {
@@ -627,7 +635,21 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
         bSig
       );
     });
-    const [cmp, ...counts] = await Promise.all([qlooCompare(aSig, bSig, 12), films, shows, music]);
+    // South African artists for both tastes: Qloo's South Africa music tag on the joint signal.
+    const local = session.includeLocal
+      ? related(run, session, `${label}, South African artists`, both, 'urn:entity:artist', 12, pools, { tags: SA_MUSIC_TAG }).then((list) => {
+          pools.local = list;
+          return scoreJobs(run, pools, [{ list, type: 'urn:entity:artist', who: ['a', 'b'] }], aSig, bSig);
+        })
+      : Promise.resolve({ calls: 0, scored: 0 });
+    // Live-music venues in their city, ordered by Qloo for both tastes.
+    const venues = session.city
+      ? related(run, session, `${label}, live music in ${session.city}`, both, 'urn:entity:place', 6, pools, { tags: LIVE_VENUE_TAG, locationQuery: session.city }).then((list) => {
+          pools.venues = list;
+          return { calls: 0, scored: 0 };
+        })
+      : Promise.resolve({ calls: 0, scored: 0 });
+    const [cmp, ...counts] = await Promise.all([qlooCompare(aSig, bSig, 12), films, shows, music, local, venues]);
     run.note(cmp.source, cmp.capturedAt, cmp.error);
     run.add('tool_call', 'qloo_compare', `qloo_compare(a=${A.name}'s favourites, b=${B.name}'s favourites)`);
     tags = verifyTags(session, cmp.data);
@@ -672,7 +694,7 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
   if (status === 'error') notices.unshift(`Qloo didn't answer (${(run.errors[0] || 'unknown error').slice(0, 140)}).`);
 
   const all = new Map<string, QlooEntity>();
-  for (const e of [...pools.movies, ...pools.tv, ...pools.artists, ...pools.aWorld, ...pools.bWorld]) all.set(e.id, e);
+  for (const e of [...pools.movies, ...pools.tv, ...pools.artists, ...pools.aWorld, ...pools.bWorld, ...pools.local]) all.set(e.id, e);
   const tagLine = tags.filter((t) => t.confirmed).slice(0, 2).map((t) => t.name).join(' and ');
   const reasonFor = (id: string, fallback: string) => (choice.reasons[id] ? fill(choice.reasons[id], session) : fallback);
   const mk = (id: string | undefined, kind: PickKind, forWhom: 'both' | PersonId, fallback: string) => {
@@ -685,6 +707,31 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
   const listen = choice.listenIds.map((id) => mk(id, 'listen', 'both', jointReason(pools.fit.get(id), session))).filter(Boolean) as Pick[];
   const forA = mk(choice.forAId, 'swap', 'b', `From ${B.name}'s side: people who like ${favNames(B)[0] || 'their favourites'} also like this. For ${A.name} to try.`);
   const forB = mk(choice.forBId, 'swap', 'a', `From ${A.name}'s side: people who like ${favNames(A)[0] || 'their favourites'} also like this. For ${B.name} to try.`);
+
+  // South African picks: fairest for both, not already in tonight's plan.
+  const used = new Set([watch, ...alsoWatch, ...listen, forA, forB].filter(Boolean).map((p) => p!.qlooEntityId));
+  const localPicks = byFairness(pools.local, pools)
+    .filter((e) => !used.has(e.id))
+    .slice(0, 3)
+    .map((e) => toPick(e, 'local', 'both', jointReason(pools.fit.get(e.id), session), pools));
+  if (session.includeLocal) {
+    run.add(
+      'guardrail',
+      'South African picks',
+      localPicks.length
+        ? `${localPicks.length} South African artists ranked fairly for both of you (Qloo's South Africa music tag): ${localPicks.map((p) => p.name).join(', ')}.`
+        : "Qloo had no South African artists for this pair's overlap."
+    );
+  }
+  const venueList: Venue[] = pools.venues.slice(0, 4).map((e) => ({
+    id: e.id,
+    name: e.name,
+    address: e.place?.address,
+    neighborhood: e.place?.neighborhood,
+    website: e.place?.website,
+    image: e.image,
+    tags: (e.tags || []).slice(0, 3)
+  }));
 
   const why =
     choice.why && choice.why.length
@@ -704,7 +751,7 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
     ? `${session.minutes} minutes: watch ${watch.name}${listen[0] ? `, then put on ${listen[0].name}` : ''}${forA && forB ? `, and swap: ${A.name} tries ${forA.name}, ${B.name} tries ${forB.name}` : ''}.`
     : 'Not enough to plan tonight. Add another favourite each and try again.';
 
-  const picks = [watch, ...alsoWatch, ...listen, forA, forB].filter(Boolean) as Pick[];
+  const picks = [watch, ...alsoWatch, ...listen, forA, forB, ...localPicks].filter(Boolean) as Pick[];
   run.add('synthesis', planner === 'llm' ? `Plan chosen by ${choice.model || 'the AI planner'}` : 'Plan chosen by rules', picks.length ? picks.map((p) => `${p.name} (${p.kind})`).join(', ') : 'No picks.');
 
   const plan: Plan = {
@@ -717,6 +764,9 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
     alsoWatch,
     listen,
     swap: { forA, forB },
+    local: localPicks,
+    venues: venueList,
+    city: session.city,
     why,
     tonight,
     trace: run.trace,

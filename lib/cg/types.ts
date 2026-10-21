@@ -1,5 +1,5 @@
 /** Common Ground: two people, their favourites, and the plans the agent makes for them. */
-import type { AgentTraceStep, QlooStatus } from '../types';
+import type { AgentTraceStep, QlooExternal, QlooStatus } from '../types';
 
 export type FavouriteType = 'urn:entity:artist' | 'urn:entity:movie' | 'urn:entity:tv_show';
 export type PersonId = 'a' | 'b';
@@ -23,7 +23,7 @@ export interface Person {
   liked: { qlooEntityId: string; name: string }[];
 }
 
-export type PickKind = 'watch' | 'also' | 'listen' | 'swap';
+export type PickKind = 'watch' | 'also' | 'listen' | 'swap' | 'local';
 
 /** How one person's taste scores a pick: Qloo affinity, and its rank among tonight's candidates. */
 export interface PersonFit {
@@ -61,9 +61,22 @@ export interface Pick {
   affinity?: number;
   durationMinutes?: number;
   fit?: PickFit;
+  external?: QlooExternal; // Spotify / Netflix / IMDb ids and ratings, from Qloo
+  local?: boolean; // carries Qloo's South African music tag
   provenance: 'qloo_live' | 'qloo_saved';
   capturedAt?: string;
   link?: { label: string; url: string };
+}
+
+/** A live-music venue Qloo ranks for the pair's combined taste, in their city. */
+export interface Venue {
+  id: string;
+  name: string;
+  address?: string;
+  neighborhood?: string;
+  website?: string;
+  image?: string;
+  tags: string[];
 }
 
 export interface SharedTag {
@@ -84,6 +97,11 @@ export interface Plan {
   alsoWatch: Pick[];
   listen: Pick[];
   swap: { forA?: Pick; forB?: Pick }; // forA: from B's world, picked for A
+  /** South African artists for the pair's overlap (Qloo's South African music tag). */
+  local: Pick[];
+  /** Live-music venues in the pair's city, ordered by Qloo for both tastes. */
+  venues: Venue[];
+  city?: string;
   why: string[];
   tonight: string;
   trace: AgentTraceStep[];
@@ -117,6 +135,9 @@ export interface Session {
   people: [Person, Person];
   minutes: number;
   exclusions: string[]; // free text, e.g. "horror"
+  city: string; // for venues and ticket links, e.g. "Johannesburg, South Africa"
+  country: string; // two-letter code for where-to-watch links, e.g. "za"
+  includeLocal: boolean; // add South African picks
   plans: Plan[]; // newest first
   feedback: PlanFeedback[]; // newest first
   seen: string[]; // Qloo ids already suggested
