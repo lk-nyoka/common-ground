@@ -8,8 +8,6 @@ import type { Pick } from '../../lib/cg/types';
  * The Mutual Fit Proof: where a pick ranks for each person's own taste among tonight's candidates,
  * and how much each person's favourites drove it. Every number here comes from Qloo.
  */
-const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
-
 /** compact: a one-line summary with the full proof behind "Why this pick?" (used for every pick but the main one). */
 export function FitProof({ pick, names, compact = false }: { pick: Pick; names: [string, string]; compact?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -41,19 +39,12 @@ export function FitProof({ pick, names, compact = false }: { pick: Pick; names: 
   if (compact && !more)
     return (
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
-        {verdict && <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${verdict.cls}`}>{topBoth ? 'Good for both' : `Leans away from ${lowFor}`}</span>}
-        <span className="text-muted">
-          {rows.map((r, i) => (
-            <span key={r.key}>
-              {i > 0 && ' · '}
-              <span className={r.text}>
-                {ordinal(r.f!.rank)} for {r.name}
-              </span>
-            </span>
-          ))}{' '}
-          of {fit.of}
-        </span>
-        <button type="button" onClick={() => setMore(true)} className="min-h-[32px] font-medium text-shared-ink underline underline-offset-2">
+        {verdict ? (
+          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${verdict.cls}`}>{topBoth ? 'Good for both of you' : `Leans towards ${lowFor === names[0] ? names[1] : names[0]}’s taste`}</span>
+        ) : (
+          rows[0] && <span className="rounded-full bg-paper px-2.5 py-1 text-xs font-semibold text-muted">Picked for {rows.map((r) => r.name).join(' and ')}</span>
+        )}
+        <button type="button" onClick={() => setMore(true)} aria-expanded={false} className="min-h-[32px] font-medium text-shared-ink underline underline-offset-2">
           Why this pick?
         </button>
       </div>
@@ -61,6 +52,11 @@ export function FitProof({ pick, names, compact = false }: { pick: Pick; names: 
 
   return (
     <div className="mt-3 rounded-2xl bg-paper p-3">
+      {compact && (
+        <button type="button" onClick={() => setMore(false)} className="float-right -mr-1 -mt-1 min-h-[32px] px-1 text-xs font-medium text-muted hover:text-ink">
+          Hide
+        </button>
+      )}
       {verdict && <p className={`mb-2 inline-block rounded-full px-2.5 py-1 text-xs font-semibold ${verdict.cls}`}>{verdict.text}</p>}
       <dl className="space-y-2">
         {rows.map((r) => (

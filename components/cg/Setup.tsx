@@ -87,7 +87,10 @@ async function checkFavourite(query: string, preferred: FavouriteType, strict = 
       const seen = new Set<string>();
       const distinct = ranked.filter((e) => !seen.has(`${fold(e.name)}|${e.type}`) && !!seen.add(`${fold(e.name)}|${e.type}`));
       const [best, ...rest] = distinct;
-      return { state: 'found', name: best.name, image: best.image, type: best.type, alts: rest.slice(0, 3).map((e) => ({ name: e.name, type: e.type })) };
+      // Collaborations and spin-offs ("The Chainsmokers, Coldplay") go last, so they're harder to tap by mistake.
+      const derived = (n: string) => /[,&+]|\bfeat\b|\bx\b/i.test(n) || fold(n) !== q;
+      const alts = [...rest].sort((x, y) => Number(derived(x.name)) - Number(derived(y.name))).slice(0, 3);
+      return { state: 'found', name: best.name, image: best.image, type: best.type, alts: alts.map((e) => ({ name: e.name, type: e.type })) };
     }
     const seen = new Set<string>();
     const options = all
@@ -176,13 +179,13 @@ function PersonCard({
   const timers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   const soon = (i: number) => {
     clearTimeout(timers.current[i]);
-    timers.current[i] = setTimeout(() => runCheck(i), 650);
+    timers.current[i] = setTimeout(() => runCheck(i), 500);
   };
   const lastChecked = useRef<Record<number, string>>({});
   const runCheck = async (i: number, force = false) => {
     const f = latest.current.favs[i];
     const q = f.query.trim();
-    if (!force && lastChecked.current[i] === `${q}|${f.type}` && f.check.state !== 'idle') return;
+    if (!force && lastChecked.current[i] === `${q}|${f.type}` && f.check.state !== 'idle' && f.check.state !== 'checking') return;
     lastChecked.current[i] = `${q}|${f.type}`;
     if (q.length < 2) return setFav(i, { check: { state: 'idle' } });
     setFav(i, { check: { state: 'checking' } });
@@ -250,7 +253,8 @@ function PersonCard({
                   <input
                     value={f.query}
                     onChange={(e) => {
-                      setFav(i, { query: e.target.value, check: { state: 'idle' } });
+                      // Show "Checking Qloo…" straight away, so the field never looks dead.
+                      setFav(i, { query: e.target.value, check: e.target.value.trim().length >= 2 ? { state: 'checking' } : { state: 'idle' } });
                       soon(i);
                     }}
                     onBlur={() => {

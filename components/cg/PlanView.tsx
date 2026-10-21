@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowUpRight, ChevronDown, RefreshCw, X } from 'lucide-react';
 import type { Pick, Plan, Session, Verdict } from '../../lib/cg/types';
 import { picksOf, sharedHitRate, summarise } from '../../lib/cg/learn';
@@ -83,7 +83,7 @@ function PickBlock({
         </div>
       </div>
       <p className="mt-3 text-[15px] leading-relaxed">{pick.reason}</p>
-      <FitProof pick={pick} names={names} compact={!hero} />
+      <FitProof pick={pick} names={names} compact />
       {pick.type.includes('artist') && <SpotifyPlayer spotifyId={pick.external?.spotifyId} name={pick.name} />}
       <LinkRow links={linksFor(pick, country)} scroll={hero} />
       {pick.provenance === 'qloo_saved' && (
@@ -240,6 +240,11 @@ function RateSheet({
   onClose: () => void;
 }) {
   const rated = Object.keys(verdicts).length;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" onClick={onClose}>
       <div role="dialog" aria-modal="true" aria-label="Rate tonight" className="flex max-h-[88vh] w-full max-w-lg flex-col rounded-t-3xl bg-card shadow-2xl sm:rounded-3xl" onClick={(e) => e.stopPropagation()}>
@@ -407,6 +412,15 @@ export function PlanView({
           <h2 id="watch-title" className="mb-1 text-sm font-semibold uppercase tracking-wider text-shared-ink">
             Tonight’s pick
           </h2>
+          {(() => {
+            const kinds = new Set(session.people.flatMap((p) => p.favourites.filter((f) => f.qlooEntityId).map((f) => f.type)));
+            const musicOnly = kinds.size > 0 && Array.from(kinds).every((k) => k === 'urn:entity:artist');
+            return musicOnly ? (
+              <p className="mb-2 rounded-2xl bg-shared-soft px-3 py-2 text-[13px] leading-snug text-shared-ink">
+                You both added music, so Qloo looked for a {plan.watch!.type.includes('tv') ? 'series' : 'film'} that fans of your music tend to love. The music picks are in the Music tab below.
+              </p>
+            ) : null;
+          })()}
           <p className="mb-4 text-[15px] leading-relaxed text-muted">{plan.tonight}</p>
           <PickBlock pick={plan.watch} verdict={verdicts[plan.watch.id]} setVerdict={set(plan.watch.id)} names={names} hero rate={false} country={country} />
         </section>
@@ -503,9 +517,9 @@ export function PlanView({
       {picks.length > 0 && (
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-card/95 px-4 py-3 backdrop-blur" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
           <div className="mx-auto flex max-w-3xl items-center gap-3">
-            <p className="min-w-0 flex-1 text-[13px] leading-snug text-muted">After your night, say who liked what. The next plan learns.</p>
+            <p className="min-w-0 flex-1 text-[13px] leading-snug text-muted">After your night: who liked what? The next plan learns.</p>
             <button type="button" onClick={() => setRating(true)} disabled={busy} className="btn-primary shrink-0 px-5">
-              {busy ? 'Planning…' : 'Rate tonight'}
+              {busy ? 'Planning…' : 'Rate tonight’s picks'}
             </button>
           </div>
         </div>

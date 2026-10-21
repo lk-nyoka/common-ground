@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowUpRight, Check, Copy, Heart, Pause, Play, Share2, Square, X } from 'lucide-react';
+import { ArrowLeft, ArrowUpRight, Check, Copy, Heart, Pause, Play, Share2, Square, X } from 'lucide-react';
 import { Art, Mark, typeLabel } from '../../../components/cg/ui';
 import type { PublicRoom } from '../../../lib/server/room-view';
 import type { RoomItem } from '../../../lib/server/rooms';
@@ -191,9 +191,14 @@ export default function RoomPage({ params, searchParams }: { params: { id: strin
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <main className="mx-auto min-h-screen max-w-md px-4 pb-10 pt-5">
-      <Link href="/" className="mb-4 inline-flex items-center gap-2 text-sm font-semibold">
-        <Mark size={18} /> Common Ground
-      </Link>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <Link href="/" className="inline-flex min-h-[44px] items-center gap-2 text-sm font-semibold" aria-label="Common Ground home">
+          <Mark size={18} /> Common Ground
+        </Link>
+        <Link href="/" className="inline-flex min-h-[40px] items-center gap-1 rounded-full border border-line bg-card px-4 text-sm font-medium hover:border-ink/30">
+          <ArrowLeft className="h-4 w-4" aria-hidden /> Back to plan
+        </Link>
+      </div>
       {children}
     </main>
   );

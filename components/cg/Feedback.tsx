@@ -66,8 +66,9 @@ export function FeedbackPrompt({ session }: { session: Session }) {
     const isDone = safe.get('local', DONE_KEY) === '1';
     setDone(isDone);
     if (isDone || safe.get('session', LATER_KEY) === '1') return;
-    // A gentle nudge: after a good look at the first plan, or soon after a second night.
-    const t = setTimeout(() => setToast(true), (plan?.number || 1) >= 2 ? 2500 : 35000);
+    // Ask once there's something to judge: after they've rated a night and seen the next plan.
+    if ((plan?.number || 1) < 2) return;
+    const t = setTimeout(() => setToast(true), 2500);
     return () => clearTimeout(t);
   }, [plan?.number]);
 
@@ -101,7 +102,7 @@ export function FeedbackPrompt({ session }: { session: Session }) {
         onClick={() => setOpen(true)}
         className="mx-auto flex min-h-[44px] items-center gap-2 rounded-full border border-line bg-card px-4 text-sm font-medium text-ink hover:border-ink/30"
       >
-        <MessageCircleHeart className="h-4 w-4 text-a" aria-hidden /> {done ? 'Tell us more about Common Ground' : 'Rate Common Ground (30 seconds)'}
+        <MessageCircleHeart className="h-4 w-4 text-a" aria-hidden /> {done ? 'Tell us more about the app' : 'Rate the app (30 seconds)'}
       </button>
       {open && (
         <Sheet

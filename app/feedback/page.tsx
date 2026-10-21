@@ -8,6 +8,10 @@ export default function FeedbackResults() {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     const key = new URLSearchParams(window.location.search).get('key') || '';
+    if (!key) {
+      setError('no key');
+      return;
+    }
     fetch(`/api/feedback?${new URLSearchParams({ key })}`)
       .then(async (r) => {
         const j = await r.json();
@@ -35,7 +39,15 @@ export default function FeedbackResults() {
   return (
     <main className="mx-auto max-w-2xl px-4 py-8">
       <h1 className="font-display text-3xl font-semibold">Tester feedback</h1>
-      {error && <p className="mt-4 text-muted">{error}</p>}
+      {error && (
+        <div className="mt-4 rounded-2xl border border-line bg-card p-5">
+          <p className="font-medium">This page is for the app’s owner.</p>
+          <p className="mt-1 text-sm text-muted">It needs an access key in the link. If you were testing the app, thank you: your feedback has been sent.</p>
+          <a href="/" className="mt-4 inline-flex min-h-[44px] items-center rounded-full bg-ink px-5 text-sm font-medium text-white">
+            Back to Common Ground
+          </a>
+        </div>
+      )}
       {data && (
         <div className="mt-6 space-y-4">
           <p>
