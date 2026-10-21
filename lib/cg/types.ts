@@ -127,6 +127,8 @@ export interface Session {
   exclusions: string[]; // free text, e.g. "horror"
   country: string; // two-letter code for where-to-watch links, e.g. "za"
   includeLocal: boolean; // add South African picks
+  /** Set when the plan is shared between two phones through an invite link. */
+  pair?: { id: string; me: PersonId };
   plans: Plan[]; // newest first
   feedback: PlanFeedback[]; // newest first
   seen: string[]; // Qloo ids already suggested

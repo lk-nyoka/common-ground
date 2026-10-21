@@ -16,6 +16,8 @@ export interface Invite {
   toName: string; // what A called B (B can change it)
   minutes: number;
   avoid: string[];
+  /** The pair space that joins the two phones, so the plan opens on both. */
+  pair?: string;
 }
 
 const TYPES: FavouriteType[] = ['urn:entity:artist', 'urn:entity:movie', 'urn:entity:tv_show'];
@@ -41,7 +43,8 @@ export function encodeInvite(inv: Invite): string {
     f: inv.from.favs.map((f) => [f.query, TYPES.indexOf(f.type)]),
     t: inv.toName,
     m: inv.minutes,
-    x: inv.avoid
+    x: inv.avoid,
+    ...(inv.pair ? { p: inv.pair } : {})
   };
   return toBase64Url(JSON.stringify(compact));
 }
@@ -64,7 +67,8 @@ export function decodeInvite(hash: string): Invite | null {
       from: { name: clean(raw.n, 24) || 'Your friend', favs },
       toName: clean(raw.t, 24),
       minutes: Number.isFinite(minutes) ? Math.min(300, Math.max(15, Math.round(minutes))) : 120,
-      avoid: Array.isArray(raw.x) ? raw.x.slice(0, 5).map((e: unknown) => clean(e, 30)).filter(Boolean) : []
+      avoid: Array.isArray(raw.x) ? raw.x.slice(0, 5).map((e: unknown) => clean(e, 30)).filter(Boolean) : [],
+      ...(typeof raw.p === 'string' && /^[A-Za-z0-9_-]{10,20}$/.test(raw.p) ? { pair: raw.p } : {})
     };
   } catch {
     return null;

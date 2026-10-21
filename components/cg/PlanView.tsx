@@ -82,7 +82,7 @@ function PickBlock({
           <p className="mt-2 text-[15px] leading-relaxed">{pick.reason}</p>
         </div>
       </div>
-      <FitProof pick={pick} names={names} />
+      <FitProof pick={pick} names={names} compact={!hero} />
       {pick.type.includes('artist') && <SpotifyPlayer spotifyId={pick.external?.spotifyId} name={pick.name} />}
       <LinkRow links={linksFor(pick, country)} />
       {pick.provenance === 'qloo_saved' && (
@@ -238,9 +238,20 @@ export function PlanView({
           {plan.number > 1 ? ', shaped by your reactions' : ''}, {minutesLabel(plan.minutes)} at home
         </p>
         <button type="button" onClick={onReset} className="min-h-[44px] shrink-0 px-2 font-medium text-muted underline-offset-2 hover:text-ink hover:underline">
-          Start over
+          {session.isSample ? 'Start over' : 'Change favourites'}
         </button>
       </div>
+
+      {session.isSample && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-shared-soft px-4 py-3 text-sm text-shared-ink">
+          <p>
+            <span className="font-semibold">This is an example pair.</span> Every pick is real Qloo data.
+          </p>
+          <button type="button" onClick={onReset} className="min-h-[40px] rounded-full bg-shared px-4 font-semibold text-white">
+            Make your own
+          </button>
+        </div>
+      )}
 
       {(plan.notices.length > 0 || unmatched.length > 0) && (
         <div className="space-y-1 rounded-2xl border border-line bg-card px-4 py-3 text-sm" role="status">

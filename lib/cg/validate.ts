@@ -110,6 +110,9 @@ export function cleanSession(input: unknown): Session {
     exclusions: arr(input.exclusions).slice(0, LIMITS.exclusions).map((e) => cleanText(e, LIMITS.exclusion)).filter(Boolean),
     country: typeof input.country === 'string' && /^[a-z]{2}$/.test(input.country) ? input.country : 'za',
     includeLocal: input.includeLocal !== false,
+    ...(isObj(input.pair) && typeof input.pair.id === 'string' && /^[A-Za-z0-9_-]{10,20}$/.test(input.pair.id) && (input.pair.me === 'a' || input.pair.me === 'b')
+      ? { pair: { id: input.pair.id, me: input.pair.me } }
+      : {}),
     plans: arr(input.plans).slice(0, LIMITS.plans).map((p, i) => cleanPlan(p, i === 0)).filter(Boolean) as Plan[],
     feedback: arr(input.feedback).slice(0, LIMITS.feedback).filter(isObj) as PlanFeedback[],
     seen: ids(input.seen, LIMITS.seen),

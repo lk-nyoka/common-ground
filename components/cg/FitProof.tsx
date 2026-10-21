@@ -8,8 +8,12 @@ import type { Pick } from '../../lib/cg/types';
  * The Mutual Fit Proof: where a pick ranks for each person's own taste among tonight's candidates,
  * and how much each person's favourites drove it. Every number here comes from Qloo.
  */
-export function FitProof({ pick, names }: { pick: Pick; names: [string, string] }) {
+const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
+
+/** compact: a one-line summary with the full proof behind "Why this pick?" (used for every pick but the main one). */
+export function FitProof({ pick, names, compact = false }: { pick: Pick; names: [string, string]; compact?: boolean }) {
   const [open, setOpen] = useState(false);
+  const [more, setMore] = useState(false);
   const id = useId();
   const fit = pick.fit;
   if (!fit || (!fit.a && !fit.b)) return null;
@@ -33,6 +37,27 @@ export function FitProof({ pick, names }: { pick: Pick; names: [string, string] 
     : topBoth
     ? { text: `Top half for both of you among ${fit.of} candidates`, cls: 'bg-shared-soft text-shared-ink' }
     : { text: `Fairest of tonight’s options, but lower for ${lowFor}`, cls: 'bg-a-soft text-a-ink' };
+
+  if (compact && !more)
+    return (
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
+        {verdict && <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${verdict.cls}`}>{topBoth ? 'Good for both' : `Leans away from ${lowFor}`}</span>}
+        <span className="text-muted">
+          {rows.map((r, i) => (
+            <span key={r.key}>
+              {i > 0 && ' · '}
+              <span className={r.text}>
+                {ordinal(r.f!.rank)} for {r.name}
+              </span>
+            </span>
+          ))}{' '}
+          of {fit.of}
+        </span>
+        <button type="button" onClick={() => setMore(true)} className="min-h-[32px] font-medium text-shared-ink underline underline-offset-2">
+          Why this pick?
+        </button>
+      </div>
+    );
 
   return (
     <div className="mt-3 rounded-2xl bg-paper p-3">

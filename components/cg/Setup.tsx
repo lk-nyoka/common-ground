@@ -1,17 +1,17 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, Copy, Link2, Loader2, Plus, Share2, X } from 'lucide-react';
+import { Check, ChevronDown, Copy, Film, Link2, Loader2, Music2, Plus, Share2, Tv, X } from 'lucide-react';
 import type { FavouriteType, Person, Session } from '../../lib/cg/types';
 import { fav, newSession, person, SAMPLE_PAIRS } from '../../lib/cg/samples';
 import { fold, namesMatch } from '../../lib/cg/match';
 import { type Invite, inviteUrl } from '../../lib/cg/invite';
 import { Art, Mark, minutesLabel } from './ui';
 
-const TYPES: { id: FavouriteType; label: string; example: [string, string] }[] = [
-  { id: 'urn:entity:artist', label: 'Music', example: ['An artist, e.g. Miriam Makeba', 'An artist, e.g. Tyla'] },
-  { id: 'urn:entity:movie', label: 'Film', example: ['A film, e.g. Black Panther', 'A film, e.g. The Notebook'] },
-  { id: 'urn:entity:tv_show', label: 'TV', example: ['A show, e.g. Abbott Elementary', "A show, e.g. Grey's Anatomy"] }
+const TYPES: { id: FavouriteType; label: string; Icon: typeof Film; example: [string, string] }[] = [
+  { id: 'urn:entity:artist', label: 'Music', Icon: Music2, example: ['An artist, e.g. Miriam Makeba', 'An artist, e.g. Tyla'] },
+  { id: 'urn:entity:movie', label: 'Film', Icon: Film, example: ['A film, e.g. Black Panther', 'A film, e.g. The Notebook'] },
+  { id: 'urn:entity:tv_show', label: 'Series', Icon: Tv, example: ['A series, e.g. Abbott Elementary', "A series, e.g. Grey's Anatomy"] }
 ];
 const MINUTES = [45, 90, 120, 180];
 const COUNTRIES: { code: string; label: string }[] = [
@@ -55,14 +55,14 @@ const fromPerson = (p?: Person): Draft => {
   };
 };
 
-const typeLabel = (t: FavouriteType) => (t === 'urn:entity:artist' ? 'music' : t === 'urn:entity:movie' ? 'film' : 'TV show');
+const typeLabel = (t: FavouriteType) => (t === 'urn:entity:artist' ? 'music' : t === 'urn:entity:movie' ? 'film' : 'series');
 
 /**
  * Ask Qloo (through our API) what this favourite is. It searches music, films and TV at once, so
  * people don't have to pick the right kind first: "The Office" finds the TV show, not a band.
  * Matching uses the planner's own rule. The most popular exact match wins; others are offered.
  */
-async function checkFavourite(query: string, preferred: FavouriteType): Promise<Check> {
+async function checkFavourite(query: string, preferred: FavouriteType, strict = false): Promise<Check> {
   try {
     const answers = await Promise.all(
       TYPES.map(async (t) => {
@@ -82,7 +82,7 @@ async function checkFavourite(query: string, preferred: FavouriteType): Promise<
       // Exactly what they typed beats a longer name ("Tyla" over "Tyla Yaweh"); then popularity,
       // then the kind they chose.
       const q = fold(query);
-      const score = (e: (typeof exact)[number]) => (fold(e.name) === q ? 10 : 0) + (e.popularity ?? 0) + (e.type === preferred ? 0.001 : 0);
+      const score = (e: (typeof exact)[number]) => (fold(e.name) === q ? 10 : 0) + (e.popularity ?? 0) + (e.type === preferred ? (strict ? 5 : 0.001) : 0);
       const ranked = [...exact].sort((x, y) => score(y) - score(x));
       const seen = new Set<string>();
       const distinct = ranked.filter((e) => !seen.has(`${fold(e.name)}|${e.type}`) && !!seen.add(`${fold(e.name)}|${e.type}`));
@@ -172,12 +172,21 @@ function PersonCard({
   latest.current = draft;
   const setFav = (i: number, patch: Partial<FavDraft>) => onChange({ ...latest.current, favs: latest.current.favs.map((f, j) => (j === i ? { ...f, ...patch } : f)) });
 
-  const runCheck = async (i: number) => {
+  // Check as they type, a moment after they stop, so they know straight away if Qloo knows it.
+  const timers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+  const soon = (i: number) => {
+    clearTimeout(timers.current[i]);
+    timers.current[i] = setTimeout(() => runCheck(i), 650);
+  };
+  const lastChecked = useRef<Record<number, string>>({});
+  const runCheck = async (i: number, force = false) => {
     const f = latest.current.favs[i];
     const q = f.query.trim();
+    if (!force && lastChecked.current[i] === `${q}|${f.type}` && f.check.state !== 'idle') return;
+    lastChecked.current[i] = `${q}|${f.type}`;
     if (q.length < 2) return setFav(i, { check: { state: 'idle' } });
     setFav(i, { check: { state: 'checking' } });
-    const result = await checkFavourite(q, f.type);
+    const result = await checkFavourite(q, f.type, force);
     // Ignore the answer if the person has typed something else since.
     if (latest.current.favs[i]?.query.trim() !== q) return;
     setFav(i, result.state === 'found' ? { check: result, type: result.type } : { check: result });
@@ -187,7 +196,6 @@ function PersonCard({
   const dot = who === 'a' ? 'bg-a' : 'bg-b';
   const mine = who === 'a' || self;
   const label = mine ? 'You' : 'The other person';
-  const examples = who === 'a' ? ['e.g. Miriam Makeba', 'e.g. Black Panther', 'e.g. Abbott Elementary'] : ['e.g. Tyla', 'e.g. The Notebook', "e.g. Grey's Anatomy"];
 
   return (
     <div className={`rounded-3xl border border-t-4 border-line bg-card p-5 ${tone}`} role="group" aria-label={label}>
@@ -211,22 +219,51 @@ function PersonCard({
       {!hideFavs && (
         <>
           <p className="mt-5 text-sm font-medium">{mine ? 'Things you love' : `Things ${draft.name.trim() || 'they'} love${draft.name.trim() ? 's' : ''}`}</p>
-          <p className="text-[13px] text-muted">Any artist, film or TV show. One is enough; three is better.</p>
+          <p className="text-[13px] text-muted">Music, a film or a series. Just type the name: we work out which it is. One is enough; three is better.</p>
           <div className="mt-2 space-y-4">
             {draft.favs.map((f, i) => (
               <div key={i}>
+                <div className="mb-1.5 flex gap-1" role="radiogroup" aria-label={`Kind of favourite ${i + 1}`}>
+                  {TYPES.map((t) => {
+                    const on = f.type === t.id && (f.check.state === 'found' || !f.query.trim() || f.check.state === 'idle' || f.check.state === 'checking');
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={f.type === t.id}
+                        onClick={() => {
+                          setFav(i, { type: t.id, check: { state: 'idle' } });
+                          // A tap means "this kind": check again, preferring it.
+                          if (f.query.trim()) setTimeout(() => runCheck(i, true), 0);
+                        }}
+                        className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium transition ${
+                          on ? 'border-ink bg-ink text-white' : 'border-line text-muted hover:border-ink/30 hover:text-ink'
+                        }`}
+                      >
+                        <t.Icon className="h-3.5 w-3.5" aria-hidden /> {t.label}
+                      </button>
+                    );
+                  })}
+                </div>
                 <div className="flex items-center gap-2">
                   <input
                     value={f.query}
-                    onChange={(e) => setFav(i, { query: e.target.value, check: { state: 'idle' } })}
-                    onBlur={() => runCheck(i)}
+                    onChange={(e) => {
+                      setFav(i, { query: e.target.value, check: { state: 'idle' } });
+                      soon(i);
+                    }}
+                    onBlur={() => {
+                      clearTimeout(timers.current[i]);
+                      runCheck(i);
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
                         (e.target as HTMLInputElement).blur();
                       }
                     }}
-                    placeholder={examples[i % 3]}
+                    placeholder={TYPES.find((t) => t.id === f.type)!.example[mine ? 0 : 1].replace(/^An? (artist|film|series), /, '')}
                     aria-label={`Favourite ${i + 1}`}
                     className="field min-w-0 flex-1"
                     maxLength={60}
@@ -251,7 +288,7 @@ function PersonCard({
           {draft.favs.length < MAX_FAVS && (
             <button
               type="button"
-              onClick={() => onChange({ ...draft, favs: [...draft.favs, blankFav()] })}
+              onClick={() => onChange({ ...draft, favs: [...draft.favs, blankFav(draft.favs.length === 1 ? 'urn:entity:movie' : 'urn:entity:tv_show')] })}
               className="mt-3 inline-flex min-h-[44px] items-center gap-1.5 text-sm font-medium text-shared-ink"
             >
               <Plus className="h-4 w-4" aria-hidden /> Add another
@@ -264,12 +301,25 @@ function PersonCard({
 }
 
 /** The second person adds their own favourites on their phone. A's half travels in the link. */
-function InvitePanel({ a, bName, minutes, avoid }: { a: Draft; bName: string; minutes: number; avoid: string }) {
+function InvitePanel({ a, bName, minutes, avoid, onSent }: { a: Draft; bName: string; minutes: number; avoid: string; onSent?: (pairId: string, them: string) => void }) {
   const [url, setUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const ready = a.favs.some((f) => f.query.trim());
   const them = bName.trim() || 'them';
   const fromName = a.name.trim() || 'Your friend';
+
+  // A pair space joins the two phones, so the plan opens on both. Made once, when it's first needed.
+  const [pair, setPair] = useState<string | undefined>(undefined);
+  const asked = useRef(false);
+  useEffect(() => {
+    if (!ready || asked.current) return;
+    asked.current = true;
+    fetch('/api/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ names: [a.name.trim(), bName.trim()] }) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => j?.id && setPair(j.id))
+      .catch(() => {});
+  }, [ready, a.name, bName]);
+  const sent = () => pair && onSent?.(pair, bName.trim());
 
   // Build the link as soon as A has a favourite, and keep it up to date as they edit.
   useEffect(() => {
@@ -279,15 +329,17 @@ function InvitePanel({ a, bName, minutes, avoid }: { a: Draft; bName: string; mi
       from: { name: fromName, favs: a.favs.filter((f) => f.query.trim()).map((f) => ({ query: f.query.trim(), type: f.type })) },
       toName: bName.trim(),
       minutes,
-      avoid: avoid.split(',').map((x) => x.trim()).filter(Boolean)
+      avoid: avoid.split(',').map((x) => x.trim()).filter(Boolean),
+      pair
     };
     setUrl(inviteUrl(window.location.origin, inv));
-  }, [a, bName, minutes, avoid, ready, fromName]);
+  }, [a, bName, minutes, avoid, ready, fromName, pair]);
 
   const message = `${fromName} wants to find something you'll both enjoy tonight. Add a few things you love here (takes a minute):`;
   const share = async () => {
     if (!url) return;
     try {
+      sent();
       if (navigator.share) await navigator.share({ text: message, url });
       else {
         await navigator.clipboard.writeText(url);
@@ -300,6 +352,7 @@ function InvitePanel({ a, bName, minutes, avoid }: { a: Draft; bName: string; mi
   };
   const copy = async () => {
     if (!url) return;
+    sent();
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
@@ -318,13 +371,14 @@ function InvitePanel({ a, bName, minutes, avoid }: { a: Draft; bName: string; mi
   return (
     <div className="mt-4 rounded-2xl bg-b-soft p-4">
       <p className="text-[15px] font-medium text-ink">Send {them} this link</p>
-      <p className="mt-1 text-sm text-muted">They add their own favourites on their phone and get the plan straight away. Your favourites travel inside the link; nothing is stored on our server.</p>
+      <p className="mt-1 text-sm text-muted">They add their own favourites on their phone. When the plan’s ready it opens on both phones, with a chat beside it.</p>
       <div className="mt-3 flex flex-wrap gap-2">
         <a
           className="inline-flex min-h-[44px] items-center gap-2 rounded-full bg-[#25D366] px-4 text-sm font-semibold text-black"
           href={`https://wa.me/?text=${encodeURIComponent(`${message} ${url}`)}`}
           target="_blank"
           rel="noreferrer"
+          onClick={sent}
         >
           <Share2 className="h-4 w-4" aria-hidden /> WhatsApp
         </a>
@@ -344,12 +398,14 @@ export function Setup({
   onStart,
   busy,
   initial,
-  invite
+  invite,
+  onInviteSent
 }: {
   onStart: (s: Session) => void;
   busy: boolean;
   initial?: Session | null;
   invite?: Invite | null;
+  onInviteSent?: (pairId: string, them: string) => void;
 }) {
   const keep = initial && !initial.isSample ? initial : null;
   const [a, setA] = useState<Draft>(() =>
@@ -453,7 +509,7 @@ export function Setup({
                     </button>
                   ))}
                 </div>
-                {bMode === 'link' && <InvitePanel a={a} bName={b.name} minutes={minutes} avoid={avoid} />}
+                {bMode === 'link' && <InvitePanel a={a} bName={b.name} minutes={minutes} avoid={avoid} onSent={onInviteSent} />}
               </>
             )
           }
@@ -514,7 +570,7 @@ export function Setup({
 
       {!invite && bMode === 'link' ? (
         <p className="rounded-2xl bg-card p-4 text-sm text-muted">
-          Once {b.name.trim() || 'they'} add{b.name.trim() ? 's' : ''} their favourites from your link, the plan opens on their phone. They can send you the room link from there to swipe together.
+          Once {b.name.trim() || 'they'} add{b.name.trim() ? 's' : ''} their favourites from your link, your plan opens here and on their phone at the same time.
         </p>
       ) : (
       <div className="flex flex-col items-start gap-3">

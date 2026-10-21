@@ -66,7 +66,8 @@ When two people with different tastes choose together, one of three things usual
   - Three artists to put on.
   - A swap each way: something from *their* world, chosen as the closest fit to *your* taste.
 - **Proves each pick.** Each pick shows its rank for each person’s taste, how much each person’s favourites pulled it, and Qloo’s joint rank (see [section 6](#6-the-mutual-fit-proof-and-fair-ranking)).
-- **Works when you’re apart.** One person sends an invite link and the other adds their own favourites on their own phone. No account or database is needed.
+- **Works when you’re apart.** On the second person's card, choose **Send them a link** and share it on WhatsApp. They add their own favourites on their phone; your screen shows them opening it and planning, and the plan opens on **both phones** at once. Rate it on either phone and the next night appears on both. No account needed.
+- **Chat beside the plan.** When you're joined by a link, a small message thread (with quick replies like “🍿 Starting now?”) sits next to the plan.
 - **Shows its work live.** While planning, the screen shows the agent’s real steps as they happen. Every plan keeps a full trace.
 - **Learns from both of you.** After the night, tap who liked each thing: both of you, one of you, or neither. The next plan builds on your answers.
 - **Your Mzansi match.** When Qloo finds a South African thread in the pair's shared taste, the plan adds South African artists ranked for both people. It queries Qloo's South African music tag with both tastes as joint signals, so the result depends on the pair (Tyla + Miriam Makeba fans get Brenda Fassie and Mafikizolo; Adele + Drake fans get Nasty C and Tyla). It is music only, because the same tag returned no films or shows. If Qloo finds nothing, the section doesn't appear. It can be switched off on the setup screen.
@@ -215,7 +216,8 @@ Learning lasts for the browser tab. There's no account, so nothing is saved afte
 - **There are no accounts and no database.** The session lives in your browser tab (`sessionStorage`) and is sent with each request. The server keeps nothing, and its logs never include names or favourites.
 - **Invite links** carry Person A's half of the setup in the part of the link after `#`, which browsers never send to the server.
 - **Study result codes** contain ratings and which method suggested each pick, nothing else.
-- **Live rooms** are the one thing the server holds: both first names and tonight's picks (titles, artwork links and ranks), in memory, for 24 hours. No favourites. They are lost if the app restarts.
+- **Joined plans and chat** (from an invite link) are held in the server's memory for 48 hours: both names, both sets of favourites, the plan and the messages. Anyone with the link can read them, so the link should only go to the other person. They're lost if the app restarts; each phone keeps its own copy of the plan.
+- **Live rooms** are the other thing the server holds: both first names and tonight's picks (titles, artwork links and ranks), in memory, for 24 hours. No favourites. They are lost if the app restarts.
 
 ## 11. What we tested, and what we left out
 
@@ -328,7 +330,7 @@ Free Render services sleep after about 15 minutes without visits, and waking one
 
 | Command | What it does |
 | --- | --- |
-| `npm test` | 28 tests with Qloo and Gemini faked; no keys needed (planner, fairness, Mzansi lane, invite links, study, and live rooms) |
+| `npm test` | 31 tests with Qloo and Gemini faked; no keys needed (planner, fairness, Mzansi lane, invite links, study, and live rooms) |
 | `npm run typecheck` | TypeScript check of the app |
 | `npm run test:live` | Plans the two example pairs against the real APIs and prints the proof for every pick |
 | `npm run eval` | The Qloo vs AI-alone evaluation ([docs/EVALUATION.md](docs/EVALUATION.md)) |
@@ -357,6 +359,7 @@ The tests check that:
 | `GET /api/room/{id}`, `POST /api/room/{id}` | `{ who, type: "swipe" \| "party_start" \| "party_pause" \| "party_resume" \| "party_end" \| "react", … }` | The room, with `serverNow` so both phones can line up the countdown. |
 | `GET /api/room/{id}/events?p=a\|b` | none | Server-sent events: the room each time it changes. |
 | `POST /api/feedback`, `GET /api/feedback?key=` | `{ ease, fit, liked, again, comment, context }` | Saves tester feedback; the summary needs `FEEDBACK_KEY`. |
+| `POST /api/pair`, `GET/POST /api/pair/{id}`, `GET /api/pair/{id}/events?p=a\|b` | `{ names }`; `{ who, type: "hello" \| "planning" \| "session" \| "message", … }` | Joins two phones after an invite: stage, shared plan (`?session=1`), chat, live events. |
 | `GET /api/img?u=` | none | Qloo artwork served from our own site, so story cards can be drawn and saved. Only `images.qloo.com` is allowed. |
 | `GET /api/status` | none | `{ qloo: { keySet, savedResponses }, llm: { configured, model } }`. Never returns the keys. |
 | `GET /api/qloo/search`, `GET /api/qloo/insights` | query parameters | Raw Qloo helpers, used by the setup form and Gentle visit |
@@ -395,7 +398,7 @@ docs/EVALUATION.md          Evaluation method and results
 ## 20. Known limitations
 
 - **Scope:** two people, at home only. Groups and going out aren't built.
-- **Live rooms** live in one server's memory, so they reset when the app redeploys or restarts. That's fine for one free instance; several would need a shared store such as Redis.
+- **Joined plans, chat and live rooms** live in one server's memory, so they reset when the app redeploys or restarts. That's fine for one free instance; several would need a shared store such as Redis.
 - **Start together** can't control playback on Netflix or Spotify. It counts you in together and keeps a shared clock and pause.
 - **Favourites:** artists, films and TV shows only. Qloo supports more domains; we kept to the ones that tested well.
 - **Popularity:** Qloo's results lean toward popular and acclaimed titles. Fair ranking stops one person dominating, but it can choose a "most even" pick that neither person ranks first.

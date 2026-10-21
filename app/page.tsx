@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AgentTraceStep } from '../lib/types';
 import type { Session, Verdict } from '../lib/cg/types';
 import { applyFeedback } from '../lib/cg/learn';
@@ -9,6 +9,11 @@ import { Setup } from '../components/cg/Setup';
 import { PlanView } from '../components/cg/PlanView';
 import { Progress } from '../components/cg/Progress';
 import { Mark } from '../components/cg/ui';
+import { pairPing, sharePlan, usePair } from '../components/cg/pair';
+import { Chat } from '../components/cg/Chat';
+
+const PENDING = 'cg-pending-pair-v1';
+type Pending = { id: string; them: string };
 
 const KEY = 'common-ground-session-v2';
 const TIMEOUT_MS = 75_000;
@@ -71,14 +76,22 @@ export default function Home() {
   const [status, setStatus] = useState<Status | null>(null);
   const [invite, setInvite] = useState<Invite | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [pending, setPending] = useState<Pending | null>(null);
+  // "Change favourites" keeps what you typed, so you can fix one thing and plan again.
+  const [draftFrom, setDraftFrom] = useState<Session | null>(null);
 
   useEffect(() => {
     const inv = decodeInvite(window.location.hash);
-    if (inv) setInvite(inv);
-    else {
+    if (inv) {
+      setInvite(inv);
+      // Tell the inviter's phone their friend has opened the link.
+      if (inv.pair) pairPing(inv.pair, 'b', 'hello', inv.toName || undefined);
+    } else {
       try {
         const raw = sessionStorage.getItem(KEY);
         if (raw) setSession(JSON.parse(raw));
+        const p = sessionStorage.getItem(PENDING);
+        if (p && !raw) setPending(JSON.parse(p));
       } catch {
         /* storage unavailable */
       }
@@ -118,6 +131,8 @@ export default function Home() {
     try {
       const next = await planRequest(url, body, (s) => setSteps((cur) => [...cur, s]), controller.signal);
       setSession(next);
+      // If two phones are joined, the other one gets this plan too.
+      sharePlan(next);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {
       setError(
@@ -137,6 +152,10 @@ export default function Home() {
     if (invite) {
       // The invite has done its job; drop it from the address bar so a refresh doesn't restart it.
       history.replaceState(null, '', window.location.pathname);
+      if (invite.pair) {
+        s = { ...s, pair: { id: invite.pair, me: 'b' } };
+        pairPing(invite.pair, 'b', 'planning', s.people[1].name);
+      }
       setInvite(null);
     }
     setSession(s);
@@ -150,9 +169,34 @@ export default function Home() {
   };
   const reset = () => {
     if (busy) return;
+    setDraftFrom(session && !session.isSample ? session : null);
     setSession(null);
     setError(null);
+    clearPending();
   };
+  const clearPending = () => {
+    setPending(null);
+    try {
+      sessionStorage.removeItem(PENDING);
+    } catch {
+      /* ignore */
+    }
+  };
+  const invited = (id: string, them: string) => {
+    const p = { id, them };
+    setPending(p);
+    try {
+      sessionStorage.setItem(PENDING, JSON.stringify(p));
+    } catch {
+      /* ignore */
+    }
+  };
+  /** The other phone made or changed the plan: show it here too. */
+  const received = useCallback((shared: Session, pair: { id: string; me: 'a' | 'b' }) => {
+    setSession({ ...shared, pair });
+    setError(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
 
   const hasPlan = !!session?.plans.length;
   const chip = status
@@ -202,9 +246,13 @@ export default function Home() {
               </div>
             )}
             <PlanView key={session.plans[0].id} session={session} busy={busy} onFeedback={feedback} onReset={reset} />
+            {session.pair && <PairBridge session={session} onReceived={received} />}
           </>
         ) : (
-          <Setup key={invite ? 'invite' : 'setup'} onStart={start} busy={busy} initial={session} invite={invite} />
+          <>
+            {pending && !invite && <Waiting pending={pending} onReceived={(s) => { received(s, { id: pending.id, me: 'a' }); clearPending(); }} onCancel={clearPending} />}
+            <Setup key={invite ? 'invite' : 'setup'} onStart={start} busy={busy} initial={session ?? draftFrom} invite={invite} onInviteSent={invited} />
+          </>
         )}
 
         <footer className="mt-16 space-y-2 border-t border-line pt-6 text-sm text-muted">
@@ -231,5 +279,67 @@ export default function Home() {
         </footer>
       </div>
     </main>
+  );
+}
+
+/** Keeps a shared plan in step between the two phones, and adds the chat. */
+function PairBridge({ session, onReceived }: { session: Session; onReceived: (s: Session, pair: { id: string; me: 'a' | 'b' }) => void }) {
+  const pair = session.pair!;
+  const { view, send, fetchSession } = usePair(pair.id, pair.me);
+  const seen = useRef<number | null>(null);
+  useEffect(() => {
+    if (!view) return;
+    if (seen.current === null) {
+      seen.current = view.sessionVersion;
+      return;
+    }
+    if (view.sessionVersion > seen.current) {
+      seen.current = view.sessionVersion;
+      if (view.sessionBy !== pair.me) fetchSession().then((s) => s && onReceived(s, pair));
+    }
+  }, [view, pair, fetchSession, onReceived]);
+  if (!view) return null;
+  return <Chat view={view} me={pair.me} send={send} />;
+}
+
+/** The inviter's screen while their friend fills in the link. */
+function Waiting({ pending, onReceived, onCancel }: { pending: Pending; onReceived: (s: Session) => void; onCancel: () => void }) {
+  const { view, gone, fetchSession } = usePair(pending.id, 'a');
+  const them = view?.names[1] && view.names[1] !== 'Them' ? view.names[1] : pending.them || 'Your friend';
+  useEffect(() => {
+    if (view && view.sessionVersion > 0) fetchSession().then((s) => s && onReceived(s));
+  }, [view, fetchSession, onReceived]);
+  const stage = gone ? 'gone' : view?.stage || 'waiting';
+  const steps = [
+    { k: 'waiting', label: 'Link sent' },
+    { k: 'joined', label: `${them} opened it` },
+    { k: 'planning', label: 'Planning your night' },
+    { k: 'ready', label: 'Your plan' }
+  ];
+  const at = Math.max(0, steps.findIndex((x) => x.k === stage));
+  return (
+    <section className="mb-6 rounded-3xl border-2 border-b bg-b-soft p-5" aria-live="polite">
+      {stage === 'gone' ? (
+        <p className="text-sm">That link has expired. Make a new one below.</p>
+      ) : (
+        <>
+          <p className="font-display text-xl font-semibold">
+            {stage === 'waiting' ? `Waiting for ${them} to open your link` : stage === 'joined' ? `${them} is adding their favourites…` : `${them} is planning your night…`}
+          </p>
+          <p className="mt-1 text-sm text-muted">Keep this page open. Your plan opens here by itself as soon as it’s ready, and you can chat beside it.</p>
+          <ol className="mt-4 grid grid-cols-4 gap-1.5">
+            {steps.map((x, i) => (
+              <li key={x.k} className="text-center text-[11px] text-muted">
+                <span className={`mb-1 block h-1.5 rounded-full ${i <= at ? 'bg-b' : 'bg-white'} ${i === at + 1 ? 'animate-pulse bg-b/40' : ''}`} />
+                {x.label}
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
+      <button type="button" onClick={onCancel} className="mt-3 text-sm font-medium text-b-ink underline underline-offset-2">
+        {stage === 'gone' ? 'Dismiss' : 'Stop waiting'}
+      </button>
+    </section>
   );
 }

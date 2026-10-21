@@ -88,3 +88,47 @@ test('feedback keeps only known answers and never more than a short note', async
   assert.equal(s.picks.both, 1);
   assert.match(discordText(f), /★★★★☆/);
 });
+
+// ---------- pair spaces (invite links that join two phones) ----------
+import { applyPair, createPair, pairView, resetPairs, actOnPair, subscribePair, getPair } from '../lib/server/pairs';
+import { decodeInvite, encodeInvite } from '../lib/cg/invite';
+
+test('a pair goes waiting → joined → planning → ready, and the plan is shared', () => {
+  resetPairs();
+  const p0 = createPair(['Sipho', 'Zanele'], 0);
+  assert.equal(pairView(p0, 0).stage, 'waiting');
+  let p = applyPair(p0, { type: 'hello', who: 'b', name: 'Zane' }, 1);
+  assert.equal(p.stage, 'joined');
+  assert.deepEqual(p.names, ['Sipho', 'Zane']);
+  p = applyPair(p, { type: 'planning', who: 'b' }, 2);
+  assert.equal(p.stage, 'planning');
+  const session: any = { people: [{ name: 'Sipho' }, { name: 'Zanele' }] };
+  p = applyPair(p, { type: 'session', who: 'b', session }, 3);
+  assert.equal(p.stage, 'ready');
+  assert.equal(p.sessionVersion, 1);
+  assert.equal(p.sessionBy, 'b');
+  // A later presence ping doesn't move it back.
+  assert.equal(applyPair(p, { type: 'planning', who: 'a' }, 4).stage, 'ready');
+});
+
+test('chat messages are trimmed, capped and rate-limited, and reach the other phone', () => {
+  resetPairs();
+  const pair = createPair(['A', 'B']);
+  const got: number[] = [];
+  const off = subscribePair(pair.id, (p) => got.push(p.messages.length));
+  actOnPair(pair.id, { type: 'message', who: 'a', text: '  hi  ' });
+  assert.throws(() => actOnPair(pair.id, { type: 'message', who: 'a', text: 'again' }), /Slow down/);
+  assert.throws(() => actOnPair(pair.id, { type: 'message', who: 'b', text: '   ' }), /Type a message/);
+  actOnPair(pair.id, { type: 'message', who: 'b', text: 'x'.repeat(900) });
+  off();
+  const p = getPair(pair.id)!;
+  assert.equal(p.messages[0].text, 'hi');
+  assert.equal(p.messages[1].text.length, 500);
+  assert.deepEqual(got, [1, 2]);
+});
+
+test('invite links carry the pair id, and reject a malformed one', () => {
+  const inv = { v: 1 as const, from: { name: 'Sipho', favs: [{ query: 'Black Panther', type: 'urn:entity:movie' as const }] }, toName: 'Zanele', minutes: 120, avoid: [], pair: 'abcDEF123_-x' };
+  assert.equal(decodeInvite(`#invite=${encodeInvite(inv)}`)?.pair, 'abcDEF123_-x');
+  assert.equal(decodeInvite(`#invite=${encodeInvite({ ...inv, pair: 'bad id!' })}`)?.pair, undefined);
+});
