@@ -6,7 +6,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { cleanSession, cleanVerdicts, InputError, trimForClient } from '../lib/cg/validate';
 import { applyFeedback, picksOf, sharedHitRate } from '../lib/cg/learn';
-import { fill, planNight } from '../lib/cg/agent';
+import { fill, planNight, topHalfForBoth } from '../lib/cg/agent';
 import { clearQlooCache } from '../lib/qloo-client';
 import { decodeInvite, encodeInvite } from '../lib/cg/invite';
 import { decodeResult, encodeResult, summarise as studySummary } from '../lib/cg/study';
@@ -265,7 +265,7 @@ test('critic: an AI pick that is unfair to one person is replaced, and the trace
   gemini = () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ watch_id: 'MOV-1', listen_ids: ['ART-1'] }) }] } }] });
   const s = await planNight(sample());
   assert.equal(s.plans[0].watch?.name, 'Notting Hill');
-  assert.ok(s.plans[0].trace.some((t) => t.action === 'Replaced an unfair pick' && /Titanic ranked low for Naledi/.test(t.details)));
+  assert.ok(s.plans[0].trace.some((t) => t.action === 'Replaced an unfair pick' && /Titanic ranked in the bottom half for Naledi/.test(t.details)));
 });
 
 test('LLM failure falls back to rules and says so', async () => {
@@ -364,18 +364,18 @@ test('study results encode without names and summarise per method', () => {
   assert.equal(decodeResult('garbage'), null);
 });
 
-// ---------- South African picks and venues ----------
+// ---------- South African picks ----------
 
-test('South African lane: SA artists ranked fairly for both, plus venues in their city', async () => {
+test('South African lane: SA artists ranked fairly for both; no venue lookups', async () => {
   const s = await planNight(sample());
   const plan = s.plans[0];
   assert.ok(plan.local.length >= 2, 'has South African picks');
   assert.ok(plan.local.every((p) => p.kind === 'local' && p.local === true));
   // Nasty C (0.7/0.6) and Master KG (0.65/0.62) suit both; Tyla (0.4/0.9) is one-sided, so it ranks last.
   assert.equal(plan.local[plan.local.length - 1].name, 'Tyla');
-  assert.equal(plan.venues[0]?.name, 'Social On Main');
-  assert.equal(lastPlaceQuery, 'Johannesburg, South Africa');
-  assert.ok(plan.venues[0].image?.startsWith('https://images.qloo.com/'));
+  // Venues were cut: our place tests showed location, not taste, decides them.
+  assert.equal(lastPlaceQuery, '');
+  assert.ok(!calls.some((c) => c.url.includes('urn%3Aentity%3Aplace') || c.url.includes('urn:entity:place')));
 });
 
 test('South African lane can be switched off', async () => {
@@ -384,4 +384,12 @@ test('South African lane can be switched off', async () => {
   const s = await planNight(sess);
   assert.equal(s.plans[0].local.length, 0);
   assert.ok(!calls.some((c) => c.url.includes('south_africa')));
+});
+
+test('"top half for both" is judged on ranks, so #4 of 5 never counts as suiting both', () => {
+  const f = (ra: number, rb: number, of: number) => ({ of, a: { affinity: 0.5, rank: ra, norm: 0 }, b: { affinity: 0.5, rank: rb, norm: 0 } });
+  assert.equal(topHalfForBoth(f(4, 2, 5)), false);
+  assert.equal(topHalfForBoth(f(3, 2, 5)), true);
+  assert.equal(topHalfForBoth(f(2, 2, 3)), true);
+  assert.equal(topHalfForBoth(undefined), false);
 });

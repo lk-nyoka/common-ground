@@ -3,7 +3,7 @@
  * server treats it as untrusted: it keeps only known fields, trims text, caps list sizes, and
  * accepts only id-shaped Qloo ids (these are sent on to Qloo as signals).
  */
-import type { Favourite, FavouriteType, Person, Pick, Plan, PlanFeedback, Session, Venue, Verdict } from './types';
+import type { Favourite, FavouriteType, Person, Pick, Plan, PlanFeedback, Session, Verdict } from './types';
 
 export class InputError extends Error {}
 
@@ -76,22 +76,6 @@ function cleanPick(p: unknown): Pick | undefined {
   return { ...(p as Pick), id: `pick-${qid}`, qlooEntityId: qid, name: cleanText(p.name, 120), reason: cleanText(p.reason, 400) };
 }
 
-function cleanVenue(v: unknown): Venue | undefined {
-  if (!isObj(v)) return undefined;
-  const id = cleanId(v.id);
-  if (!id) return undefined;
-  const url = (u: unknown) => (typeof u === 'string' && /^https:\/\//.test(u) ? u.slice(0, 500) : undefined);
-  return {
-    id,
-    name: cleanText(v.name, 120),
-    address: cleanText(v.address, 200) || undefined,
-    neighborhood: cleanText(v.neighborhood, 80) || undefined,
-    website: typeof v.website === 'string' && /^https?:\/\//.test(v.website) ? v.website.slice(0, 300) : undefined,
-    image: url(v.image),
-    tags: arr(v.tags).slice(0, 4).map((t) => cleanText(t, 40)).filter(Boolean)
-  };
-}
-
 function cleanPlan(p: unknown, keepTrace: boolean): Plan | null {
   if (!isObj(p)) return null;
   const plan = p as Plan;
@@ -102,8 +86,6 @@ function cleanPlan(p: unknown, keepTrace: boolean): Plan | null {
     listen: arr(plan.listen).slice(0, 3).map(cleanPick).filter(Boolean) as Pick[],
     swap: { forA: cleanPick(plan.swap?.forA), forB: cleanPick(plan.swap?.forB) },
     local: arr(plan.local).slice(0, 3).map(cleanPick).filter(Boolean) as Pick[],
-    venues: arr(plan.venues).slice(0, 6).map(cleanVenue).filter(Boolean) as Venue[],
-    city: cleanText(plan.city, 80) || undefined,
     commonGround: arr(plan.commonGround).slice(0, 8),
     why: arr(plan.why).slice(0, 3).map((w) => cleanText(w, 300)),
     tonight: cleanText(plan.tonight, 500),
@@ -125,7 +107,6 @@ export function cleanSession(input: unknown): Session {
     people,
     minutes: Number.isFinite(minutes) ? Math.min(300, Math.max(15, Math.round(minutes))) : 120,
     exclusions: arr(input.exclusions).slice(0, LIMITS.exclusions).map((e) => cleanText(e, LIMITS.exclusion)).filter(Boolean),
-    city: cleanText(input.city, 80) || 'Johannesburg, South Africa',
     country: typeof input.country === 'string' && /^[a-z]{2}$/.test(input.country) ? input.country : 'za',
     includeLocal: input.includeLocal !== false,
     plans: arr(input.plans).slice(0, LIMITS.plans).map((p, i) => cleanPlan(p, i === 0)).filter(Boolean) as Plan[],

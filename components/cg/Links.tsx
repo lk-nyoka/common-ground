@@ -13,14 +13,13 @@ export interface LinkOption {
 }
 
 /** Where to watch or listen, built from the ids Qloo provides. No availability is claimed that we can't check. */
-export function linksFor(p: Pick, country: string, city?: string): LinkOption[] {
+export function linksFor(p: Pick, country: string): LinkOption[] {
   const ext = p.external || {};
   const out: LinkOption[] = [];
   if (p.type.includes('artist')) {
     if (ext.spotifyId) out.push({ label: 'Open in Spotify', url: `https://open.spotify.com/artist/${ext.spotifyId}`, primary: true });
     else out.push({ label: 'Find on Spotify', url: `https://open.spotify.com/search/${enc(p.name)}`, primary: true });
     out.push({ label: 'YouTube Music', url: `https://music.youtube.com/search?q=${enc(p.name)}` });
-    if (city) out.push({ label: 'Find shows near you', url: `https://www.google.com/search?q=${enc(`${p.name} live ${city.split(',')[0]} tickets`)}` });
     return out;
   }
   if (ext.netflixId) out.push({ label: 'Open on Netflix', url: `https://www.netflix.com/title/${ext.netflixId}`, primary: true });

@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Check, Copy, Link2, Loader2, Plus, X } from 'lucide-react';
 import type { FavouriteType, Person, Session } from '../../lib/cg/types';
-import { DEFAULT_CITY, fav, newSession, person, SAMPLE_PAIRS } from '../../lib/cg/samples';
+import { fav, newSession, person, SAMPLE_PAIRS } from '../../lib/cg/samples';
 import { namesMatch } from '../../lib/cg/match';
 import { type Invite, inviteUrl } from '../../lib/cg/invite';
 import { Art, Mark, minutesLabel } from './ui';
@@ -283,7 +283,6 @@ export function Setup({
   const [b, setB] = useState<Draft>(() => (invite ? { name: invite.toName, favs: [blankFav()] } : fromPerson(keep?.people[1])));
   const [minutes, setMinutes] = useState(invite?.minutes || keep?.minutes || 120);
   const [avoid, setAvoid] = useState(invite?.avoid.join(', ') || keep?.exclusions.join(', ') || '');
-  const [city, setCity] = useState(keep?.city || DEFAULT_CITY);
   const [country, setCountry] = useState(keep?.country || 'za');
   const [includeLocal, setIncludeLocal] = useState(keep?.includeLocal ?? true);
 
@@ -377,10 +376,6 @@ export function Setup({
           <input value={avoid} onChange={(e) => setAvoid(e.target.value)} placeholder="e.g. horror, war" className="field mt-2" maxLength={80} />
         </label>
         <label className="block">
-          <span className="text-sm font-medium">Your city (for venues near you)</span>
-          <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. Johannesburg, South Africa" className="field mt-2" maxLength={80} autoComplete="address-level2" />
-        </label>
-        <label className="block">
           <span className="text-sm font-medium">Streaming country</span>
           <select value={country} onChange={(e) => setCountry(e.target.value)} className="field mt-2">
             {COUNTRIES.map((c) => (
@@ -393,8 +388,8 @@ export function Setup({
         <label className="flex min-h-[44px] items-center gap-3 sm:col-span-2">
           <input type="checkbox" checked={includeLocal} onChange={(e) => setIncludeLocal(e.target.checked)} className="h-5 w-5 accent-[#6F42C1]" />
           <span className="text-sm">
-            <span className="font-medium">Include South African picks</span>
-            <span className="text-muted"> (a Mzansi match for both of you)</span>
+            <span className="font-medium">Look for a Mzansi match</span>
+            <span className="text-muted"> (South African artists, when Qloo finds a local thread in your shared taste)</span>
           </span>
         </label>
       </section>
@@ -407,7 +402,7 @@ export function Setup({
           disabled={!ready || busy}
           onClick={() =>
             onStart(
-              newSession(toPerson('a', a), toPerson('b', b), minutes, avoid.split(',').map((s) => s.trim()).filter(Boolean), false, { city: city.trim(), country, includeLocal })
+              newSession(toPerson('a', a), toPerson('b', b), minutes, avoid.split(',').map((s) => s.trim()).filter(Boolean), false, { country, includeLocal })
             )
           }
           className="btn-primary w-full sm:w-auto"

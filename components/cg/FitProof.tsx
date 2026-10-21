@@ -23,8 +23,20 @@ export function FitProof({ pick, names }: { pick: Pick; names: [string, string] 
 
   const width = (rank: number) => (fit.of <= 1 ? 100 : Math.max(8, Math.round(((fit.of - rank) / (fit.of - 1)) * 100)));
 
+  // A plain verdict, so a pick in the bottom half for someone is never presented as suiting both.
+  const half = Math.ceil(fit.of / 2);
+  const both = fit.a && fit.b;
+  const topBoth = both && fit.a!.rank <= half && fit.b!.rank <= half;
+  const lowFor = both && !topBoth ? (fit.a!.rank > fit.b!.rank ? names[0] : names[1]) : undefined;
+  const verdict = !both
+    ? undefined
+    : topBoth
+    ? { text: `Top half for both of you among ${fit.of} candidates`, cls: 'bg-shared-soft text-shared-ink' }
+    : { text: `Fairest of tonight’s options, but lower for ${lowFor}`, cls: 'bg-a-soft text-a-ink' };
+
   return (
     <div className="mt-3 rounded-2xl bg-paper p-3">
+      {verdict && <p className={`mb-2 inline-block rounded-full px-2.5 py-1 text-xs font-semibold ${verdict.cls}`}>{verdict.text}</p>}
       <dl className="space-y-2">
         {rows.map((r) => (
           <div key={r.key} className="grid grid-cols-[minmax(0,5.5rem)_1fr_auto] items-center gap-2.5 text-sm">
@@ -41,7 +53,7 @@ export function FitProof({ pick, names }: { pick: Pick; names: [string, string] 
 
       {fit.share && (
         <div className="mt-3">
-          <p className="text-xs text-muted">How much each of your favourites pulled this pick</p>
+          <p className="text-xs text-muted">Each person’s share of the signal behind this pick (Qloo explainability)</p>
           <div className="mt-1.5 flex h-2 overflow-hidden rounded-full" aria-hidden>
             <div className="bg-a" style={{ width: `${Math.round(fit.share.a * 100)}%` }} />
             <div className="bg-b" style={{ width: `${Math.round(fit.share.b * 100)}%` }} />
@@ -73,7 +85,7 @@ export function FitProof({ pick, names }: { pick: Pick; names: [string, string] 
             Qloo scored all {fit.of} candidates against each person’s favourites on their own, then we ranked them.
             {rows.map((r) => ` ${r.name}: affinity ${r.f!.affinity.toFixed(2)}.`).join('')}
           </p>
-          {fit.share && <p>The split is Qloo’s explainability: how much each person’s favourites drove this result.</p>}
+          {fit.share && <p>The split comes from Qloo’s explainability output: each person’s favourites’ share of the signal behind this result. It isn’t a measure of how much either of you will enjoy it.</p>}
           {fit.jointRank && <p>For both of your tastes together, Qloo put it at #{fit.jointRank}.</p>}
           <p>These describe what people with similar favourites tend to like. They are not a promise that either of you will love it.</p>
         </div>

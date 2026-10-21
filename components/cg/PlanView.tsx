@@ -11,7 +11,6 @@ import { LinkRow, linksFor, Ratings, SpotifyPlayer } from './Links';
 import { StoryViewer } from './Stories';
 import { Sparkles, Users } from 'lucide-react';
 import { roomItemsFrom } from '../../lib/cg/room-items';
-import { DropsEntry } from './DropsEntry';
 
 function meta(p: Pick) {
   const bits: string[] = [typeLabel(p.type)];
@@ -58,8 +57,7 @@ function PickBlock({
   names,
   hero,
   rate,
-  country,
-  city
+  country
 }: {
   pick: Pick;
   verdict?: Verdict;
@@ -68,7 +66,6 @@ function PickBlock({
   hero?: boolean;
   rate: boolean;
   country: string;
-  city?: string;
 }) {
   return (
     <article>
@@ -86,7 +83,7 @@ function PickBlock({
       </div>
       <FitProof pick={pick} names={names} />
       {pick.type.includes('artist') && <SpotifyPlayer spotifyId={pick.external?.spotifyId} name={pick.name} />}
-      <LinkRow links={linksFor(pick, country, city)} />
+      <LinkRow links={linksFor(pick, country)} />
       <p className="mt-2 text-[12px] text-muted" title={pick.provenance === 'qloo_saved' && pick.capturedAt ? `Saved ${pick.capturedAt.slice(0, 10)}` : undefined}>
         {pick.provenance === 'qloo_live' ? 'From Qloo just now' : 'From a saved Qloo response'}
       </p>
@@ -227,7 +224,7 @@ export function PlanView({
   const rated = Object.keys(verdicts).length;
   const unmatched = session.people.flatMap((p) => p.favourites.filter((f) => f.unmatched).map((f) => `${f.query} (${p.name})`));
   const block = (p: Pick, hero = false) => (
-    <PickBlock key={p.id} pick={p} verdict={verdicts[p.id]} setVerdict={set(p.id)} names={names} hero={hero} rate={rating} country={session.country || 'za'} city={plan.city || session.city} />
+    <PickBlock key={p.id} pick={p} verdict={verdicts[p.id]} setVerdict={set(p.id)} names={names} hero={hero} rate={rating} country={session.country || 'za'} />
   );
 
   return (
@@ -277,12 +274,11 @@ export function PlanView({
         >
           <span>
             <span className="block font-display text-lg font-semibold">{roomBusy ? 'Opening a room…' : 'Swipe together, live'}</span>
-            <span className="block text-sm text-white/80">Each of you swipes on your own phone. Match, then watch or listen at the same moment.</span>
+            <span className="block text-sm text-white/80">Can’t decide? Each of you swipes on tonight’s picks on your own phone. Match, then start together.</span>
           </span>
           <Users className="h-6 w-6 shrink-0" aria-hidden />
         </button>
       )}
-      {picks.length > 0 && <DropsEntry session={session} />}
       {roomError && (
         <p className="rounded-2xl bg-a-soft px-4 py-2 text-sm text-a-ink" role="alert">
           {roomError}
@@ -326,7 +322,7 @@ export function PlanView({
           <h2 id="local-title" className="text-lg font-semibold">
             Your Mzansi match
           </h2>
-          <p className="mb-4 mt-1 text-sm text-muted">South African artists Qloo ranks for both of your tastes.</p>
+          <p className="mb-4 mt-1 text-sm text-muted">Qloo found a South African thread in your shared taste: these artists carry its South African music tag and are ranked here for both of you. Music only, because Qloo returned no South African films or shows for this tag.</p>
           <div className="space-y-6">{plan.local.map((p) => block(p))}</div>
         </section>
       )}
@@ -351,41 +347,6 @@ export function PlanView({
               ) : null
             )}
           </div>
-        </section>
-      )}
-
-      {plan.venues?.length > 0 && (
-        <section className="rounded-3xl border border-line bg-card p-5 sm:p-6" aria-labelledby="venues-title">
-          <h2 id="venues-title" className="text-lg font-semibold">
-            Going out instead?
-          </h2>
-          <p className="mb-4 mt-1 text-sm text-muted">
-            Live-music venues in {(plan.city || session.city || '').split(',')[0]} that Qloo ranks for both of your tastes. Location matters more than taste for places, so treat these as a starting point.
-          </p>
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {plan.venues.map((v) => (
-              <li key={v.id} className="flex gap-3 rounded-2xl border border-line p-3">
-                <Art src={v.image} type="urn:entity:place" className="h-16 w-16 shrink-0 rounded-xl" />
-                <div className="min-w-0">
-                  <p className="font-semibold leading-snug">{v.name}</p>
-                  {v.address && <p className="mt-0.5 text-[13px] text-muted">{v.address}</p>}
-                  <div className="mt-1.5 flex flex-wrap gap-x-3 text-[13px] font-medium">
-                    <a className="text-shared-ink underline underline-offset-2" target="_blank" rel="noreferrer" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${v.name} ${v.address || ''}`)}`}>
-                      Directions
-                    </a>
-                    {v.website && (
-                      <a className="text-shared-ink underline underline-offset-2" target="_blank" rel="noreferrer" href={v.website}>
-                        Website
-                      </a>
-                    )}
-                    <a className="text-shared-ink underline underline-offset-2" target="_blank" rel="noreferrer" href={`https://www.google.com/search?q=${encodeURIComponent(`${v.name} events this week`)}`}>
-                      What’s on
-                    </a>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
         </section>
       )}
 

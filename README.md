@@ -8,6 +8,15 @@ Common Ground is a planning agent for two people: a couple, two friends, or a pa
 - **Built for:** the [Qloo Agentic Hackathon](https://qloo.devpost.com/) (“Agents, but with taste”)
 - **Licence:** MIT
 
+### For judges: the 30-second version
+
+- **What it is:** an agent that plans one night for two people whose tastes differ. Qloo finds the overlap, the agent turns it into a plan, and every pick shows its rank for each person on their own.
+- **Why it needs Qloo:** the plan is built from Qloo's joint-signal results, per-person scoring and explainability. A pick in the bottom half for one person is never presented as suiting both: it is either replaced or labelled "fairest of tonight's options, but lower for …".
+- **The local thread:** when the pair's shared taste has a South African music signal in Qloo, a **Mzansi match** appears (for example, Adele + Drake fans get Nasty C, Tyla and Master KG).
+- **Social, not solitary:** an invite link for the second person, a **live swipe room** where a match lands on both phones at once, a shared **start-together** countdown, and **story cards** to share the result.
+- **Evidence:** a Qloo-vs-AI-alone evaluation on 16 mismatched pairs, with its caveats, plus a blind study built in at `/study` ([section 8](#8-evaluation)).
+- **Try it:** tap **Gogo and Lwazi** on the [live app](https://common-ground-pho7.onrender.com). No sign-up.
+
 ---
 
 ## Contents
@@ -32,7 +41,8 @@ Common Ground is a planning agent for two people: a couple, two friends, or a pa
 18. [API reference](#18-api-reference)
 19. [Project structure](#19-project-structure)
 20. [Known limitations](#20-known-limitations)
-21. [Licence](#21-licence)
+21. [Roadmap](#21-roadmap)
+22. [Licence](#22-licence)
 
 ---
 
@@ -59,16 +69,22 @@ When two people with different tastes choose together, one of three things usual
 - **Works when you’re apart.** One person sends an invite link and the other adds their own favourites on their own phone. No account or database is needed.
 - **Shows its work live.** While planning, the screen shows the agent’s real steps as they happen. Every plan keeps a full trace.
 - **Learns from both of you.** After the night, tap who liked each thing: both of you, one of you, or neither. The next plan builds on your answers.
+- **Your Mzansi match.** When Qloo finds a South African thread in the pair's shared taste, the plan adds South African artists ranked for both people. It queries Qloo's South African music tag with both tastes as joint signals, so the result depends on the pair (Tyla + Miriam Makeba fans get Brenda Fassie and Mafikizolo; Adele + Drake fans get Nasty C and Tyla). It is music only, because the same tag returned no films or shows. If Qloo finds nothing, the section doesn't appear. It can be switched off on the setup screen.
+- **Where to watch or listen.** Cards open the exact Netflix title or Spotify artist when Qloo links one, plus a JustWatch search for your country, a trailer search and IMDb. Ratings from IMDb, Rotten Tomatoes and Metacritic come from Qloo. Artists can be played in a Spotify player on the page. We don't check availability ourselves; the links take you to services that do.
+- **Swipe together, live.** For when you can't decide: a room with a link for each phone. Each person swipes on tonight's picks, and a pick both say yes to becomes a match on both screens at once. No second phone? Open the other side in a new tab. A swipe means "I'd consider it tonight"; the after-the-night rating is what the agent learns from.
+- **Start together.** From a match, both phones count down to the same second on the server's clock, then show a shared timer with "pause for both" and reactions. It can't control Netflix or Spotify: each person presses play themselves.
+- **Story cards.** "Play our story" turns the plan into 1080×1920 cards (your common ground, the bridge film with both ranks, your Mzansi match, the swap) to share to WhatsApp or Instagram, or save.
 
 ## 3. Try it in 60 seconds
 
 1. Open the [live app](https://common-ground-pho7.onrender.com) and tap **Gogo and Lwazi**. Gogo loves Miriam Makeba; Lwazi loves Tyla and Black Panther.
 2. Watch the agent’s steps appear while it plans. This usually takes 10–25 seconds.
 3. Look at **Where your tastes meet**: South Africa, Love, Vocals, Melodic, Charismatic, Freedom.
-4. Under **Watch together**, read the proof. For example: “Gogo #4 of 5, Lwazi #2 of 5, pulled 33% by Gogo’s favourites and 67% by Lwazi’s”. Open **What these numbers mean** for the raw scores.
-5. Tap **Rate tonight**. Mark one pick “We both liked it” and one “Neither”, then **Plan our next night**.
-6. Night 2 opens with what night 1 taught the agent, and builds on what you both liked.
-7. Open **How the agent planned this** to see every Qloo call and every check.
+4. Under **Watch together**, read the proof: each person's rank among tonight's candidates, each person's share of Qloo's signal behind the pick, and a plain verdict ("Top half for both of you", or "Fairest of tonight's options, but lower for …"). Open **What these numbers mean** for the raw scores.
+5. Scroll to **Your Mzansi match**, then tap **Play our story** for the shareable cards, or **Swipe together, live** to try the room (open the other side in a new tab).
+6. Tap **Rate tonight**. Mark one pick “We both liked it” and one “Neither”, then **Plan our next night**.
+7. Night 2 opens with what night 1 taught the agent, and builds on what you both liked.
+8. Open **How the agent planned this** to see every Qloo call and every check.
 
 The examples only fill in the favourites. Everything after that is a real Qloo result.
 
@@ -197,6 +213,7 @@ Learning lasts for the browser tab. There's no account, so nothing is saved afte
 - **There are no accounts and no database.** The session lives in your browser tab (`sessionStorage`) and is sent with each request. The server keeps nothing, and its logs never include names or favourites.
 - **Invite links** carry Person A's half of the setup in the part of the link after `#`, which browsers never send to the server.
 - **Study result codes** contain ratings and which method suggested each pick, nothing else.
+- **Live rooms** are the one thing the server holds: both first names and tonight's picks (titles, artwork links and ranks), in memory, for 24 hours. No favourites. They are lost if the app restarts.
 
 ## 11. What we tested, and what we left out
 
@@ -206,7 +223,9 @@ Learning lasts for the browser tab. There's no account, so nothing is saved afte
 
 **Films change strongly with taste.** Results for the pair are genuinely different from either person's solo results.
 
-So this version is **at home only**: watch and listen. "Going out" is left out until we can show its places suit both people, not just that they're nearby.
+So this version is **at home only**: watch and listen. "Going out" is left out until we can show its places suit both people, not just that they're nearby. We built a live-venues section during development and removed it for this reason.
+
+**What else we built and left out of this submission.** A per-person "taste drops" feature (a daily artist or film, chosen on the phone by a small Bayesian model with Thompson sampling, with push notifications) works, and is on the [`expansion-full`](https://github.com/lk-nyoka/common-ground/tree/expansion-full) branch. We left it out because with a handful of reactions per person its predictions would be too thin to trust, it learns one person rather than the pair, and its schedules would need durable storage. See [section 21](#21-roadmap).
 
 ## 12. Gentle visit (experimental)
 
@@ -305,7 +324,7 @@ Free Render services sleep after about 15 minutes without visits, and waking one
 
 | Command | What it does |
 | --- | --- |
-| `npm test` | 17 tests with Qloo and Gemini faked; no keys needed |
+| `npm test` | 25 tests with Qloo and Gemini faked; no keys needed (planner, fairness, Mzansi lane, invite links, study, and live rooms) |
 | `npm run typecheck` | TypeScript check of the app |
 | `npm run test:live` | Plans the two example pairs against the real APIs and prints the proof for every pick |
 | `npm run eval` | The Qloo vs AI-alone evaluation ([docs/EVALUATION.md](docs/EVALUATION.md)) |
@@ -330,6 +349,10 @@ The tests check that:
 | `POST /api/cg/plan` | `{ session }` | `{ session }` with a new plan at the front of `plans`. Send `Accept: application/x-ndjson` to stream `{type:"step"}` lines, then `{type:"done", session}`. |
 | `POST /api/cg/feedback` | `{ session, verdicts: { [pickId]: "both" \| "a" \| "b" \| "neither" } }` | The same as `/plan`, after applying the feedback. |
 | `POST /api/study` | `{ session }` | `{ items }`: both methods' picks, merged and shuffled. |
+| `POST /api/room` | `{ names, items }` | `{ id }` for a new live room. The other person opens `/room/{id}?p=b`. |
+| `GET /api/room/{id}`, `POST /api/room/{id}` | `{ who, type: "swipe" \| "party_start" \| "party_pause" \| "party_resume" \| "party_end" \| "react", … }` | The room, with `serverNow` so both phones can line up the countdown. |
+| `GET /api/room/{id}/events?p=a\|b` | none | Server-sent events: the room each time it changes. |
+| `GET /api/img?u=` | none | Qloo artwork served from our own site, so story cards can be drawn and saved. Only `images.qloo.com` is allowed. |
 | `GET /api/status` | none | `{ qloo: { keySet, savedResponses }, llm: { configured, model } }`. Never returns the keys. |
 | `GET /api/qloo/search`, `GET /api/qloo/insights` | query parameters | Raw Qloo helpers, used by the setup form and Gentle visit |
 | `POST /api/agent/*` | | Gentle visit |
@@ -340,11 +363,14 @@ The tests check that:
 app/
   page.tsx                  Common Ground: setup → live progress → plan → feedback
   study/, study/results/    Blind study and its results page
+  room/[id]/                Live room: swipe to match, start together
   gentle/                   Gentle visit (experimental)
   api/cg/plan, feedback     Planning routes (streaming)
   api/study                 Both methods for the blind study
+  api/room/*                Live rooms and their event stream
+  api/img                   Qloo artwork proxy for story cards
   api/status, api/qloo/*    Status and raw Qloo helpers
-components/cg/              Setup, PlanView, FitProof, Venn, Progress, ui
+components/cg/              Setup, PlanView, FitProof, Links (where to watch), Stories, Venn, Progress, ui
 lib/cg/agent.ts             The planning agent: matching, exploring, scoring, fairness, critic
 lib/cg/baseline.ts          The AI-alone baseline
 lib/cg/learn.ts             Feedback and the shared hit count
@@ -354,7 +380,8 @@ lib/cg/validate.ts          Server-side input checks and size limits
 lib/cg/match.ts             Name matching shared by the planner and the form
 lib/qloo-client.ts          Qloo search, insights, compare, per-person scoring; cache, rate limiting
 lib/llm.ts                  Gemini with function calling, model fallback and cooldown
-lib/server/                 Rate limiting, safe errors, logs, streaming
+lib/cg/room-items.ts        Turns a plan into a swipe deck
+lib/server/                 Rate limiting, safe errors, logs, streaming, rooms
 instrumentation.ts          Keeps the free Render service awake
 tests/                      Unit tests, live check, evaluation
 docs/EVALUATION.md          Evaluation method and results
@@ -363,14 +390,26 @@ docs/EVALUATION.md          Evaluation method and results
 ## 20. Known limitations
 
 - **Scope:** two people, at home only. Groups and going out aren't built.
+- **Live rooms** live in one server's memory, so they reset when the app redeploys or restarts. That's fine for one free instance; several would need a shared store such as Redis.
+- **Start together** can't control playback on Netflix or Spotify. It counts you in together and keeps a shared clock and pause.
 - **Favourites:** artists, films and TV shows only. Qloo supports more domains; we kept to the ones that tested well.
 - **Popularity:** Qloo's results lean toward popular and acclaimed titles. Fair ranking stops one person dominating, but it can choose a "most even" pick that neither person ranks first.
 - **Small candidate pools:** a short time limit can leave only a few films. Ranks such as "#2 of 5" are then coarse.
 - **Unverified enjoyment:** the evaluation's affinity measures are Qloo's own, and only the blind study measures enjoyment.
 - **Speed:** Qloo's hackathon API is rate-limited, and free Gemini models are sometimes busy. A plan can take 20–30 seconds; when the AI is busy, fixed rules pick from the same Qloo results.
 - **Learning:** lasts for the browser tab only.
-- **Streaming:** availability isn't checked. Links search for a trailer or the artist.
+- **Streaming:** availability isn't checked by us. Netflix and Spotify links open the exact title only when Qloo links one; otherwise they search JustWatch or Spotify.
+- **Mzansi match** is music only, and Qloo's results lean toward well-known South African artists.
 
-## 21. Licence
+## 21. Roadmap
+
+In order of what we'd build next, each only with evidence that it helps the pair:
+
+1. **Persistent pair spaces:** a private, expiring space that two people share, so learning outlasts the tab. It needs consent, expiry, deletion and a durable store.
+2. **Taste drops:** the per-person daily discovery on the `expansion-full` branch, re-aimed at the pair, and only once there is enough feedback to evaluate it.
+3. **Verified streaming availability by country**, with provider attribution.
+4. **Going out:** only if Qloo's place or event results can be shown to depend on taste as well as location.
+
+## 22. Licence
 
 MIT. See [LICENSE](LICENSE).

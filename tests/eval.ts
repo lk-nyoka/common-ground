@@ -10,7 +10,7 @@
  *  - avoid:        picks carrying a tag the pair asked to avoid
  *  - repeats:      suggesting one of the pair's own favourites back to them
  *  - worst-off:    Qloo affinity for the person each pick suits LEAST, and the gap between the two
- *  - discovery:    share of Common Ground's films that are in NEITHER person's own top 30
+ *  - discovery:    share of each method's films (found in Qloo) that are in NEITHER person's own top 30
  *
  * Be honest about the worst-off measure: Common Ground chooses picks using these same Qloo scores,
  * so it is expected to win there. It shows the fairness logic works, not that people enjoy the picks.
@@ -135,6 +135,8 @@ async function main() {
     const solo = new Set([...soloA.data, ...soloB.data].map((e) => e.id));
     const cgFilms = cg.filter((i) => i.type === T.movie && i.id);
     const notInSolo = cgFilms.filter((i) => !solo.has(i.id!)).length;
+    const llmFilms = llm.filter((i) => i.type === T.movie && i.id);
+    const llmNotInSolo = llmFilms.filter((i) => !solo.has(i.id!)).length;
 
     const checks = (items: Scored[]) => ({
       total: items.length,
@@ -147,7 +149,7 @@ async function main() {
       worstOff: items.filter((i) => typeof i.a === 'number' && typeof i.b === 'number').map((i) => Math.min(i.a!, i.b!)),
       gaps: items.filter((i) => typeof i.a === 'number' && typeof i.b === 'number').map((i) => Math.abs(i.a! - i.b!))
     });
-    const row = { pair: label, planner: plan.planner, model: plan.plannerModel, baselineModel: base.model, baselineError: base.error, cg, llm, cgChecks: checks(cg), llmChecks: checks(llm), cgFilms: cgFilms.length, notInSolo };
+    const row = { pair: label, planner: plan.planner, model: plan.plannerModel, baselineModel: base.model, baselineError: base.error, cg, llm, cgChecks: checks(cg), llmChecks: checks(llm), cgFilms: cgFilms.length, notInSolo, llmFilms: llmFilms.length, llmNotInSolo };
     rows.push(row);
     console.log(`done (${plan.planner}; baseline ${base.items.length} items${base.error ? `, ${base.error}` : ''})`);
   }
@@ -176,7 +178,8 @@ async function main() {
       avoid_hits: sum((r) => r.llmChecks.avoidHits),
       repeats_of_favourites: sum((r) => r.llmChecks.repeats),
       mean_worst_off_affinity: +mean(all('llmChecks', 'worstOff')).toFixed(3),
-      mean_gap_between_people: +mean(all('llmChecks', 'gaps')).toFixed(3)
+      mean_gap_between_people: +mean(all('llmChecks', 'gaps')).toFixed(3),
+      films_in_neither_persons_top30: pctOf(sum((r) => r.llmNotInSolo), sum((r) => r.llmFilms))
     },
     pairs_where_common_ground_had_higher_worst_off_affinity: `${pairsWon} of ${rows.length}`,
     common_ground_picks_also_suggested_by_llm: `${rows.reduce((n, r) => n + r.cg.filter((c: Scored) => c.id && r.llm.some((l: Scored) => l.id === c.id)).length, 0)} of ${sum((r) => r.cgChecks.total)}`,

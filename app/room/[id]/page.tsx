@@ -139,13 +139,20 @@ export default function RoomPage({ params, searchParams }: { params: { id: strin
       </header>
 
       {who === 'a' && !room.online.b && <Invite id={room.id} them={them} />}
+      <p className="mt-3 text-sm text-muted">
+        Only one phone to hand?{' '}
+        <a href={`/room/${room.id}${who === 'a' ? '?p=b' : ''}`} target="_blank" rel="noreferrer" className="font-medium text-shared-ink underline underline-offset-2">
+          Open {them}’s side in a new tab
+        </a>{' '}
+        and play both.
+      </p>
 
       <nav className="mt-4 grid grid-cols-3 gap-1 rounded-full bg-card p-1 text-sm font-medium shadow-sm" aria-label="Room">
         {(
           [
             ['swipe', 'Swipe'],
             ['matches', `Matches${matches.length ? ` (${matches.length})` : ''}`],
-            ['party', 'Together']
+            ['party', 'Start together']
           ] as [Tab, string][]
         ).map(([k, label]) => (
           <button
@@ -357,7 +364,7 @@ function Deck({ room, who, me, them, send, onDone }: { room: PublicRoom; who: 'a
           <Heart className="h-8 w-8" aria-hidden />
         </button>
       </div>
-      <p className="mt-2 text-center text-xs text-muted">Drag the card, tap the buttons, or use the arrow keys. Only picks you both like show up as matches.</p>
+      <p className="mt-2 text-center text-xs text-muted">Drag the card, tap the buttons, or use the arrow keys. Yes means “I’d consider it tonight”. After you’ve watched, rate it on your plan so the next plan learns.</p>
     </div>
   );
 }
@@ -424,10 +431,10 @@ function PartyView({ room, who, them, send, serverNow, matches }: { room: Public
     const options = matches.length ? matches : room.items.slice(0, 6);
     return (
       <div className="rounded-3xl border border-line bg-card p-5">
-        <p className="font-display text-xl font-semibold">Watch or listen at the same moment</p>
+        <p className="font-display text-xl font-semibold">Start together, even when you’re apart</p>
         <p className="mt-1 text-sm text-muted">
-          Pick one and both phones count down together. At zero you each press play: Spotify plays right here, and for films you open your own streaming app. We can’t control
-          Netflix, so the shared timer and pause button keep you in step.
+          Pick one and both phones count down to the same second. At zero you each press play yourselves: music plays in the Spotify player here, and for films you open your
+          own streaming app. We can’t control Netflix or Spotify playback; the shared timer and “pause for both” keep you in step.
         </p>
         <p className="mt-4 text-sm font-medium">{matches.length ? 'Your matches' : 'Tonight’s picks'}</p>
         <ul className="mt-2 grid grid-cols-2 gap-2">
@@ -451,7 +458,7 @@ function PartyView({ room, who, them, send, serverNow, matches }: { room: Public
       <div className="flex items-center gap-3">
         <Art src={img(item.image)} type={item.type} className="h-16 w-12 shrink-0 rounded-lg" />
         <div className="min-w-0">
-          <p className="text-xs uppercase tracking-wider text-white/60">{isArtist ? 'Listening together' : 'Watching together'}</p>
+          <p className="text-xs uppercase tracking-wider text-white/60">{isArtist ? 'Listening in step' : 'Watching in step'}</p>
           <p className="truncate font-display text-xl font-semibold">{item.name}</p>
         </div>
       </div>

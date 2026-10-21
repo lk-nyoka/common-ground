@@ -211,7 +211,7 @@ async function draw(card: Card, session: Session, plan: Plan): Promise<string> {
   if (card.kind === 'local') {
     bg(C.b);
     text(ctx, 'Our Mzansi match', 80, 260, 96, { weight: 700, color: C.white });
-    text(ctx, 'South African artists for both of our tastes', 80, 350, 40, { font: BODY, weight: 500, color: 'rgba(255,255,255,0.85)', max: W - 160 });
+    text(ctx, 'South African artists Qloo found in our shared taste', 80, 350, 40, { font: BODY, weight: 500, color: 'rgba(255,255,255,0.85)', max: W - 160 });
     const imgs = await Promise.all(card.picks.map((p) => loadImage(proxied(p.image))));
     card.picks.forEach((p, i) => {
       const y = 620 + i * 390;
@@ -249,7 +249,7 @@ async function draw(card: Card, session: Session, plan: Plan): Promise<string> {
     text(ctx, 'common ground', W / 2, 1170, 96, { weight: 700, color: C.shared, align: 'center' });
     const host = typeof window !== 'undefined' ? window.location.host : '';
     text(ctx, host, W / 2, 1320, 44, { font: BODY, weight: 600, color: C.muted, align: 'center' });
-    text(ctx, 'Every pick comes from Qloo’s taste graph and shows why it suits you both.', W / 2, 1460, 36, { font: BODY, weight: 500, color: C.muted, align: 'center', max: W - 240 });
+    text(ctx, 'Every pick comes from Qloo’s taste graph, with its rank for each of us.', W / 2, 1460, 36, { font: BODY, weight: 500, color: C.muted, align: 'center', max: W - 240 });
     footer(ctx, false);
   }
 

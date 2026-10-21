@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: 'Common Ground',
     short_name: 'Common Ground',
-    description: 'Two tastes, one plan. Qloo finds where you meet; taste drops nudge you to try something new.',
+    description: 'Two tastes, one night you will both enjoy. Qloo finds where you meet.',
     start_url: '/',
     display: 'standalone',
     background_color: '#F4F3F8',

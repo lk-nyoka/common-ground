@@ -68,17 +68,6 @@ export interface Pick {
   link?: { label: string; url: string };
 }
 
-/** A live-music venue Qloo ranks for the pair's combined taste, in their city. */
-export interface Venue {
-  id: string;
-  name: string;
-  address?: string;
-  neighborhood?: string;
-  website?: string;
-  image?: string;
-  tags: string[];
-}
-
 export interface SharedTag {
   name: string;
   subtype: string;
@@ -99,9 +88,6 @@ export interface Plan {
   swap: { forA?: Pick; forB?: Pick }; // forA: from B's world, picked for A
   /** South African artists for the pair's overlap (Qloo's South African music tag). */
   local: Pick[];
-  /** Live-music venues in the pair's city, ordered by Qloo for both tastes. */
-  venues: Venue[];
-  city?: string;
   why: string[];
   tonight: string;
   trace: AgentTraceStep[];
@@ -135,7 +121,6 @@ export interface Session {
   people: [Person, Person];
   minutes: number;
   exclusions: string[]; // free text, e.g. "horror"
-  city: string; // for venues and ticket links, e.g. "Johannesburg, South Africa"
   country: string; // two-letter code for where-to-watch links, e.g. "za"
   includeLocal: boolean; // add South African picks
   plans: Plan[]; // newest first

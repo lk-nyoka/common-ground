@@ -13,7 +13,7 @@ import type { AgentTraceStep, QlooEntity, QlooStatus } from '../types';
 import { qlooCompare, qlooKeyIsSet, qlooRelated, qlooScore, qlooSearch, savedFixtureCount } from '../qloo-client';
 import { extractJson, FunctionDeclaration, GeminiContent, GeminiPart, geminiGenerate, llmIsConfigured, modelOf } from '../llm';
 import { fold, namesMatch } from './match';
-import type { Favourite, Person, PersonFit, PersonId, Pick, PickFit, PickKind, Plan, Session, SharedTag, Venue } from './types';
+import type { Favourite, Person, PersonFit, PersonId, Pick, PickFit, PickKind, Plan, Session, SharedTag } from './types';
 
 type Source = 'live' | 'saved' | 'unavailable';
 
@@ -123,14 +123,12 @@ interface Pools {
   aWorld: QlooEntity[]; // artists from A's side
   bWorld: QlooEntity[]; // artists from B's side
   local: QlooEntity[]; // South African artists for both tastes (Qloo's South Africa music tag)
-  venues: QlooEntity[]; // live-music venues in the pair's city
   sourceOf: Map<string, { source: Source; capturedAt?: string }>;
   fit: Map<string, PickFit>; // Qloo evidence per candidate id
 }
 
 /** Qloo tags verified on the hackathon API (Oct 2026). */
 export const SA_MUSIC_TAG = 'urn:tag:genre:music:south_africa';
-export const LIVE_VENUE_TAG = 'urn:tag:category:place:live_music_venue';
 
 async function related(
   run: Run,
@@ -241,9 +239,27 @@ function finishScoring(run: Run, pools: Pools, aSig: string[], bSig: string[], t
  * each person's own scale (see PersonFit.norm). Qloo's raw affinity breaks ties, so in a very small
  * pool the pick with the better worse-case affinity still wins. Unscored candidates score 0.
  */
+/**
+ * Maximin fairness on each person's own ranking of tonight's candidates (the same ranks the card
+ * shows), so the pick put first is the one whose worse rank is best. Ties go to the affinity-scaled
+ * position, then to the weaker person's raw affinity.
+ */
 export function fairScore(fit: PickFit | undefined): number {
   if (!fit?.a || !fit?.b) return 0;
-  return Math.min(fit.a.norm, fit.b.norm) + 0.01 * Math.min(fit.a.affinity, fit.b.affinity) + 0.0001 * (fit.a.norm + fit.b.norm);
+  const pos = (rank: number) => (fit.of > 1 ? 1 - (rank - 1) / (fit.of - 1) : 1);
+  return (
+    Math.min(pos(fit.a.rank), pos(fit.b.rank)) +
+    0.01 * Math.min(fit.a.norm, fit.b.norm) +
+    0.001 * Math.min(fit.a.affinity, fit.b.affinity) +
+    0.00001 * (fit.a.norm + fit.b.norm)
+  );
+}
+
+/** True when a pick ranks in the top half of tonight's candidates for each person on their own. */
+export function topHalfForBoth(fit: PickFit | undefined): boolean {
+  if (!fit?.a || !fit?.b) return false;
+  const half = Math.ceil(fit.of / 2);
+  return fit.a.rank <= half && fit.b.rank <= half;
 }
 
 function byFairness(list: QlooEntity[], pools: Pools): QlooEntity[] {
@@ -490,25 +506,28 @@ ${list(pools.bWorld, 'a')}`;
 function critic(run: Run, session: Session, pools: Pools, choice: Choice): Choice {
   const fit = choice.watchId ? pools.fit.get(choice.watchId) : undefined;
   if (!fit || !fit.a || !fit.b) return choice;
-  const worst = Math.min(fit.a.norm, fit.b.norm); // on each person's own scale
   // Compare like with like: ranks are only comparable within the same list (films or TV).
   const sameList = pools.movies.some((e) => e.id === choice.watchId) ? pools.movies : pools.tv;
   const pool = sameList.filter((e) => e.id !== choice.watchId);
   const better = byFairness(pool, pools)[0];
-  const lowForSomeone = worst < 1 / 3;
-  if (!lowForSomeone || !better || fairScore(pools.fit.get(better.id)) <= fairScore(fit) + 0.005) {
+  // "Low" means the bottom half of that person's own ranking of tonight's candidates: the same
+  // test the Mutual Fit Proof shows on the card.
+  const lowForSomeone = !topHalfForBoth(fit);
+  const betterFit = better ? pools.fit.get(better.id) : undefined;
+  const betterIsTopHalf = topHalfForBoth(betterFit);
+  if (!lowForSomeone || !better || !betterIsTopHalf || fairScore(betterFit) <= fairScore(fit) + 0.005) {
     run.add(
       'guardrail',
       'Checked the pick is fair',
       lowForSomeone
-        ? 'The film or show scores low for one of you, but no other candidate suits you both better, so it stands.'
-        : "The film or show scores reasonably for both of you on your own scales, so the AI's choice stands."
+        ? 'The film or show is in the bottom half for one of you, but no candidate is in the top half for both, so it stands as the most even option.'
+        : "The film or show is in the top half of tonight's candidates for both of you, so the AI's choice stands."
     );
     return choice;
   }
   const name = (id?: string) => [...pools.movies, ...pools.tv].find((e) => e.id === id)?.name || 'its pick';
-  const lowFor = fit.a.norm < fit.b.norm ? session.people[0].name : session.people[1].name;
-  run.add('guardrail', 'Replaced an unfair pick', `${name(choice.watchId)} ranked low for ${lowFor}, so ${better.name}, which scores more evenly for both of you, is tonight's pick instead.`);
+  const lowFor = fit.a.rank > fit.b.rank ? session.people[0].name : session.people[1].name;
+  run.add('guardrail', 'Replaced an unfair pick', `${name(choice.watchId)} ranked in the bottom half for ${lowFor}, so ${better.name}, which is in the top half for both of you, is tonight's pick instead.`);
   const reasons = { ...choice.reasons };
   delete reasons[choice.watchId!];
   return { ...choice, watchId: better.id, alsoIds: choice.alsoIds.filter((id) => id !== better.id), reasons };
@@ -559,7 +578,11 @@ function jointReason(fit: PickFit | undefined, session: Session, tagLine?: strin
   const [A, B] = session.people;
   if (fit?.a && fit?.b) {
     const ranks = `#${fit.a.rank} of ${fit.of} for ${A.name}'s taste and #${fit.b.rank} for ${B.name}'s`;
-    return fit.a.norm >= 2 / 3 && fit.b.norm >= 2 / 3 ? `A strong match for you both: ${ranks}.` : `The most even option Qloo found: ${ranks}.`;
+    return fit.a.norm >= 2 / 3 && fit.b.norm >= 2 / 3
+      ? `A strong match for you both: ${ranks}.`
+      : topHalfForBoth(fit)
+      ? `In the top half for both of you: ${ranks}.`
+      : `The most even of tonight's options, though lower for one of you: ${ranks}.`;
   }
   return `Qloo found it from both your favourites together${tagLine ? `; you both lean ${tagLine}` : ''}.`;
 }
@@ -600,7 +623,7 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
 
   const aSig = signalsOf(A);
   const bSig = signalsOf(B);
-  const pools: Pools = { movies: [], tv: [], artists: [], aWorld: [], bWorld: [], local: [], venues: [], sourceOf: new Map(), fit: new Map() };
+  const pools: Pools = { movies: [], tv: [], artists: [], aWorld: [], bWorld: [], local: [], sourceOf: new Map(), fit: new Map() };
   let tags: SharedTag[] = [];
 
   if (aSig.length && bSig.length) {
@@ -642,14 +665,7 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
           return scoreJobs(run, pools, [{ list, type: 'urn:entity:artist', who: ['a', 'b'] }], aSig, bSig);
         })
       : Promise.resolve({ calls: 0, scored: 0 });
-    // Live-music venues in their city, ordered by Qloo for both tastes.
-    const venues = session.city
-      ? related(run, session, `${label}, live music in ${session.city}`, both, 'urn:entity:place', 6, pools, { tags: LIVE_VENUE_TAG, locationQuery: session.city }).then((list) => {
-          pools.venues = list;
-          return { calls: 0, scored: 0 };
-        })
-      : Promise.resolve({ calls: 0, scored: 0 });
-    const [cmp, ...counts] = await Promise.all([qlooCompare(aSig, bSig, 12), films, shows, music, local, venues]);
+    const [cmp, ...counts] = await Promise.all([qlooCompare(aSig, bSig, 12), films, shows, music, local]);
     run.note(cmp.source, cmp.capturedAt, cmp.error);
     run.add('tool_call', 'qloo_compare', `qloo_compare(a=${A.name}'s favourites, b=${B.name}'s favourites)`);
     tags = verifyTags(session, cmp.data);
@@ -696,10 +712,21 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
   const all = new Map<string, QlooEntity>();
   for (const e of [...pools.movies, ...pools.tv, ...pools.artists, ...pools.aWorld, ...pools.bWorld, ...pools.local]) all.set(e.id, e);
   const tagLine = tags.filter((t) => t.confirmed).slice(0, 2).map((t) => t.name).join(' and ');
-  const reasonFor = (id: string, fallback: string) => (choice.reasons[id] ? fill(choice.reasons[id], session) : fallback);
+  // For a shared pick that is in the bottom half for one person, the AI's note can't claim it
+  // suits both, so the evidence-only reason is used instead and the trace says so.
+  let overruled = 0;
+  const reasonFor = (id: string, fallback: string, shared = false) => {
+    if (!choice.reasons[id]) return fallback;
+    const fit = pools.fit.get(id);
+    if (shared && fit?.a && fit?.b && !topHalfForBoth(fit)) {
+      overruled++;
+      return fallback;
+    }
+    return fill(choice.reasons[id], session);
+  };
   const mk = (id: string | undefined, kind: PickKind, forWhom: 'both' | PersonId, fallback: string) => {
     const e = id ? all.get(id) : undefined;
-    return e ? toPick(e, kind, forWhom, reasonFor(e.id, fallback), pools) : undefined;
+    return e ? toPick(e, kind, forWhom, reasonFor(e.id, fallback, forWhom === 'both'), pools) : undefined;
   };
 
   const watch = mk(choice.watchId, 'watch', 'both', jointReason(pools.fit.get(choice.watchId || ''), session, tagLine));
@@ -707,6 +734,9 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
   const listen = choice.listenIds.map((id) => mk(id, 'listen', 'both', jointReason(pools.fit.get(id), session))).filter(Boolean) as Pick[];
   const forA = mk(choice.forAId, 'swap', 'b', `From ${B.name}'s side: people who like ${favNames(B)[0] || 'their favourites'} also like this. For ${A.name} to try.`);
   const forB = mk(choice.forBId, 'swap', 'a', `From ${A.name}'s side: people who like ${favNames(A)[0] || 'their favourites'} also like this. For ${B.name} to try.`);
+
+  if (overruled)
+    run.add('guardrail', 'Kept the notes honest', `${overruled} of the AI's notes described a pick as suiting you both when it is in the bottom half for one of you, so they were replaced with Qloo's ranks.`);
 
   // South African picks: fairest for both, not already in tonight's plan.
   const used = new Set([watch, ...alsoWatch, ...listen, forA, forB].filter(Boolean).map((p) => p!.qlooEntityId));
@@ -723,16 +753,6 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
         : "Qloo had no South African artists for this pair's overlap."
     );
   }
-  const venueList: Venue[] = pools.venues.slice(0, 4).map((e) => ({
-    id: e.id,
-    name: e.name,
-    address: e.place?.address,
-    neighborhood: e.place?.neighborhood,
-    website: e.place?.website,
-    image: e.image,
-    tags: (e.tags || []).slice(0, 3)
-  }));
-
   const why =
     choice.why && choice.why.length
       ? choice.why.map((w) => fill(w, session))
@@ -765,8 +785,6 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
     listen,
     swap: { forA, forB },
     local: localPicks,
-    venues: venueList,
-    city: session.city,
     why,
     tonight,
     trace: run.trace,
