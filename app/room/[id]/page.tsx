@@ -564,7 +564,7 @@ function MatchOverlay({ item, names, onClose, onWatch }: { item: RoomItem; names
         <p className="mt-4 font-display text-2xl font-semibold">{item.name}</p>
         <div className="mt-6 flex flex-col gap-2">
           <button type="button" onClick={onWatch} className="min-h-[48px] rounded-full bg-white font-semibold text-shared-ink">
-            {item.type.includes('artist') ? 'Listen together now' : 'Watch together now'}
+            Start together now
           </button>
           <button type="button" onClick={onClose} className="min-h-[44px] rounded-full border border-white/40">
             Keep swiping

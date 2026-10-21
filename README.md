@@ -14,7 +14,7 @@ Common Ground is a planning agent for two people: a couple, two friends, or a pa
 - **Why it needs Qloo:** the plan is built from Qloo's joint-signal results, per-person scoring and explainability. A pick in the bottom half for one person is never presented as suiting both: it is either replaced or labelled "fairest of tonight's options, but lower for …".
 - **The local thread:** when the pair's shared taste has a South African music signal in Qloo, a **Mzansi match** appears (for example, Adele + Drake fans get Nasty C, Tyla and Master KG).
 - **Social, not solitary:** an invite link for the second person, a **live swipe room** where a match lands on both phones at once, a shared **start-together** countdown, and **story cards** to share the result.
-- **Evidence:** a Qloo-vs-AI-alone evaluation on 16 mismatched pairs, with its caveats, plus a blind study built in at `/study` ([section 8](#8-evaluation)).
+- **Evidence:** a Qloo-vs-AI-alone evaluation on 15 mismatched pairs: the person each pick suits least gets higher Qloo affinity in 15 of 15, and every film fits the time. We also report where the AI alone did better (it names more films outside both people's top 30). A blind study is built in at `/study` ([section 8](#8-evaluation)).
 - **Try it:** tap **Gogo and Lwazi** on the [live app](https://common-ground-pho7.onrender.com). No sign-up.
 
 ---
@@ -130,7 +130,7 @@ shared tags    films · TV · artists            artists from A’s side and B�
 An LLM on its own can name films that a Metallica fan and a Taylor Swift fan *might* both like. Our evaluation shows it names real titles and follows instructions well. What it can't do is **measure** how well a pick fits each person, or find what the two tastes have in common in data. Qloo's graph is built from real affinity data across domains, and Common Ground uses five parts of it:
 
 - **Compare** gives the taste tags two sets of favourites share.
-- **Multi-entity insights** return what people who like *both* sets of things also like. In our evaluation, 64% of the films Common Ground picked were in *neither* person's own top 30.
+- **Multi-entity insights** return what people who like *both* sets of things also like, so the pair's candidates differ from either person's solo results.
 - **Per-person scoring** (`filter.results.entities`) scores any candidate against one person's favourites, which makes the Mutual Fit Proof possible.
 - **Explainability** (`feature.explainability`) shows how much each input drove a result, so the app can show balance.
 - **Entity metadata** such as runtimes, tags and content ratings makes "we have 90 minutes" and "avoid horror" real constraints.
@@ -174,19 +174,20 @@ These numbers describe what people with similar favourites tend to like. They ar
 
 ## 8. Evaluation
 
-We compared Common Ground with **the same Gemini model on its own**, using 16 deliberately mismatched taste pairs; 14 were usable. The full method and caveats are in [docs/EVALUATION.md](docs/EVALUATION.md). In brief:
+We compared Common Ground with **the same Gemini model on its own**, using 16 deliberately mismatched taste pairs; 15 were usable. The full method and caveats are in [docs/EVALUATION.md](docs/EVALUATION.md). In brief:
 
 | Measure | Common Ground | AI alone |
 | --- | --- | --- |
-| Suggestions Qloo could find | 82 of 82 | 84 of 84 |
-| Films checked against the time available | 36 of 36 | 0 of 34 (no runtimes known) |
-| Films in neither person's own top 30 | 64% | not measured |
-| Mean Qloo affinity for the person each pick suits least | 0.831 | 0.772 |
-| Mean gap between the two people | 0.071 | 0.101 |
+| Suggestions Qloo could find | 90 of 90 | 88 of 90 |
+| Films checked against the time available | 35 of 35 | 0 of 40 (not checkable) |
+| Films in neither person's own top 30 | 77% | 92% |
+| Mean Qloo affinity for the person each pick suits least | 0.843 | 0.771 |
+| Mean gap between the two people | 0.056 | 0.090 |
 
 What we take from it:
-- The AI alone was more reliable than we expected: it invented no titles and respected avoid lists.
-- Common Ground's advantages are joint discovery, real constraints and measured balance.
+- The AI alone was more reliable than we expected: it rarely named titles Qloo couldn't find, and it respected avoid lists.
+- **Discovery isn't our advantage.** The AI alone names more films outside both people's top 30, because it doesn't draw from Qloo at all. We measured it to check our own claim, and dropped the claim.
+- Common Ground's advantages are **measured balance** (higher worst-off affinity in 15 of 15 pairs, a smaller gap between the two people) and **real constraints** (every film's runtime checked).
 - The affinity rows use the same Qloo scores Common Ground optimises, so they show the fairness logic works, **not** that people enjoy the picks more.
 
 To measure enjoyment, the app includes a **blind study** at [`/study`](https://common-ground-pho7.onrender.com/study):
