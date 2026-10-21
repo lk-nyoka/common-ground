@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, Copy, Link2, Loader2, Plus, X } from 'lucide-react';
+import { Check, ChevronDown, Copy, Link2, Loader2, Plus, Share2, X } from 'lucide-react';
 import type { FavouriteType, Person, Session } from '../../lib/cg/types';
 import { fav, newSession, person, SAMPLE_PAIRS } from '../../lib/cg/samples';
 import { namesMatch } from '../../lib/cg/match';
@@ -29,8 +29,8 @@ const MAX_FAVS = 3;
 type Check =
   | { state: 'idle' }
   | { state: 'checking' }
-  | { state: 'found'; name: string; image?: string }
-  | { state: 'suggest'; names: string[] }
+  | { state: 'found'; name: string; image?: string; type: FavouriteType; alts: { name: string; type: FavouriteType }[] }
+  | { state: 'suggest'; options: { name: string; type: FavouriteType }[] }
   | { state: 'missing' }
   | { state: 'offline' };
 
@@ -55,47 +55,88 @@ const fromPerson = (p?: Person): Draft => {
   };
 };
 
-/** Ask Qloo (through our API) whether it knows this favourite, using the planner's own matching rule. */
-async function checkFavourite(query: string, type: FavouriteType): Promise<Check> {
+const typeLabel = (t: FavouriteType) => (t === 'urn:entity:artist' ? 'music' : t === 'urn:entity:movie' ? 'film' : 'TV show');
+
+/**
+ * Ask Qloo (through our API) what this favourite is. It searches music, films and TV at once, so
+ * people don't have to pick the right kind first: "The Office" finds the TV show, not a band.
+ * Matching uses the planner's own rule. The most popular exact match wins; others are offered.
+ */
+async function checkFavourite(query: string, preferred: FavouriteType): Promise<Check> {
   try {
-    const res = await fetch(`/api/qloo/search?${new URLSearchParams({ query, type })}`);
-    if (!res.ok) return { state: 'offline' };
-    const data = await res.json();
-    if (data.source === 'unavailable') return { state: 'offline' };
-    const results: { name: string; image?: string }[] = Array.isArray(data.results) ? data.results : [];
-    const hit = results.find((r) => namesMatch(r.name, query));
-    if (hit) return { state: 'found', name: hit.name, image: hit.image };
-    const names = Array.from(new Set(results.map((r) => r.name))).slice(0, 3);
-    if (names.length) return { state: 'suggest', names };
+    const answers = await Promise.all(
+      TYPES.map(async (t) => {
+        const res = await fetch(`/api/qloo/search?${new URLSearchParams({ query, type: t.id })}`);
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (data.source === 'unavailable') return null;
+        const results: { name: string; image?: string; popularity?: number }[] = Array.isArray(data.results) ? data.results : [];
+        return results.map((r) => ({ ...r, type: t.id }));
+      })
+    );
+    if (answers.every((a) => a === null)) return { state: 'offline' };
+    const all = answers.flatMap((a) => a || []);
+    const exact = all.filter((r) => namesMatch(r.name, query));
+    if (exact.length) {
+      // One best match per kind, then the most popular kind first (ties go to the kind they chose).
+      const perType = TYPES.map((t) => exact.filter((e) => e.type === t.id).sort((x, y) => (y.popularity ?? 0) - (x.popularity ?? 0))[0]).filter(Boolean) as typeof exact;
+      perType.sort((x, y) => (y.popularity ?? 0) - (x.popularity ?? 0) || (x.type === preferred ? -1 : y.type === preferred ? 1 : 0));
+      const [best, ...rest] = perType;
+      return { state: 'found', name: best.name, image: best.image, type: best.type, alts: rest.map((e) => ({ name: e.name, type: e.type })) };
+    }
+    const seen = new Set<string>();
+    const options = all
+      .sort((x, y) => (y.popularity ?? 0) - (x.popularity ?? 0))
+      .filter((r) => !seen.has(`${r.name}|${r.type}`) && !!seen.add(`${r.name}|${r.type}`))
+      .slice(0, 4)
+      .map((r) => ({ name: r.name, type: r.type }));
+    if (options.length) return { state: 'suggest', options };
     return { state: 'missing' };
   } catch {
     return { state: 'offline' };
   }
 }
 
-function CheckLine({ check, onUse }: { check: Check; onUse: (name: string) => void }) {
+function CheckLine({ check, onUse }: { check: Check; onUse: (name: string, type: FavouriteType) => void }) {
   if (check.state === 'idle') return null;
   if (check.state === 'checking')
     return (
-      <p className="mt-1.5 flex items-center gap-1.5 text-[13px] text-muted">
+      <p className="mt-1.5 flex items-center gap-1.5 text-[13px] text-muted" role="status">
         <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> Checking Qloo…
       </p>
     );
   if (check.state === 'found')
     return (
-      <p className="mt-1.5 flex items-center gap-2 text-[13px] text-ink">
-        <Art src={check.image} type="urn:entity:artist" className="h-6 w-6 rounded-full" />
-        <Check className="h-3.5 w-3.5 text-shared" aria-hidden /> Qloo knows {check.name}
-      </p>
+      <div className="mt-1.5 text-[13px]" role="status">
+        <p className="flex items-center gap-2 text-ink">
+          <Art src={check.image} type={check.type} className="h-6 w-6 rounded-full" />
+          <Check className="h-3.5 w-3.5 text-shared" aria-hidden /> Qloo knows {check.name} <span className="text-muted">({typeLabel(check.type)})</span>
+        </p>
+        {check.alts.length > 0 && (
+          <p className="mt-1 flex flex-wrap items-center gap-1.5 text-muted">
+            Not that one?
+            {check.alts.map((a) => (
+              <button key={a.type} type="button" className="min-h-[32px] rounded-full border border-line px-2.5 font-medium text-ink" onClick={() => onUse(a.name, a.type)}>
+                {a.name} ({typeLabel(a.type)})
+              </button>
+            ))}
+          </p>
+        )}
+      </div>
     );
   if (check.state === 'suggest')
     return (
       <div className="mt-1.5 text-[13px] text-ink">
         <p>Qloo doesn’t know that exactly. Did you mean:</p>
         <div className="mt-1 flex flex-wrap gap-1.5">
-          {check.names.map((n) => (
-            <button key={n} type="button" className="min-h-[36px] rounded-full border border-shared/40 bg-shared-soft px-3 font-medium text-shared-ink" onClick={() => onUse(n)}>
-              {n}
+          {check.options.map((o) => (
+            <button
+              key={`${o.name}|${o.type}`}
+              type="button"
+              className="min-h-[36px] rounded-full border border-shared/40 bg-shared-soft px-3 font-medium text-shared-ink"
+              onClick={() => onUse(o.name, o.type)}
+            >
+              {o.name} <span className="font-normal">({typeLabel(o.type)})</span>
             </button>
           ))}
         </div>
@@ -105,7 +146,21 @@ function CheckLine({ check, onUse }: { check: Check; onUse: (name: string) => vo
   return <p className="mt-1.5 text-[13px] text-muted">Couldn’t check right now. We’ll try again when you plan.</p>;
 }
 
-function PersonCard({ who, draft, onChange, autoFocus }: { who: 'a' | 'b'; draft: Draft; onChange: (d: Draft) => void; autoFocus?: boolean }) {
+function PersonCard({
+  who,
+  draft,
+  onChange,
+  autoFocus,
+  top,
+  hideFavs
+}: {
+  who: 'a' | 'b';
+  draft: Draft;
+  onChange: (d: Draft) => void;
+  autoFocus?: boolean;
+  top?: React.ReactNode; // shown under the name: for the second person, the "send a link" choice
+  hideFavs?: boolean;
+}) {
   const latest = useRef(draft);
   latest.current = draft;
   const setFav = (i: number, patch: Partial<FavDraft>) => onChange({ ...latest.current, favs: latest.current.favs.map((f, j) => (j === i ? { ...f, ...patch } : f)) });
@@ -117,12 +172,14 @@ function PersonCard({ who, draft, onChange, autoFocus }: { who: 'a' | 'b'; draft
     setFav(i, { check: { state: 'checking' } });
     const result = await checkFavourite(q, f.type);
     // Ignore the answer if the person has typed something else since.
-    if (latest.current.favs[i]?.query.trim() === q && latest.current.favs[i]?.type === f.type) setFav(i, { check: result });
+    if (latest.current.favs[i]?.query.trim() !== q) return;
+    setFav(i, result.state === 'found' ? { check: result, type: result.type } : { check: result });
   };
 
   const tone = who === 'a' ? 'border-t-a' : 'border-t-b';
   const dot = who === 'a' ? 'bg-a' : 'bg-b';
-  const label = who === 'a' ? 'First person' : 'Second person';
+  const label = who === 'a' ? 'You' : 'The other person';
+  const examples = who === 'a' ? ['e.g. Miriam Makeba', 'e.g. Black Panther', 'e.g. Abbott Elementary'] : ['e.g. Tyla', 'e.g. The Notebook', "e.g. Grey's Anatomy"];
 
   return (
     <div className={`rounded-3xl border border-t-4 border-line bg-card p-5 ${tone}`} role="group" aria-label={label}>
@@ -133,7 +190,7 @@ function PersonCard({ who, draft, onChange, autoFocus }: { who: 'a' | 'b'; draft
         <input
           value={draft.name}
           onChange={(e) => onChange({ ...draft, name: e.target.value })}
-          placeholder={who === 'a' ? 'Your name' : 'Their name'}
+          placeholder={who === 'a' ? 'Your first name' : 'Their first name'}
           className="field mt-2 font-display text-lg"
           maxLength={24}
           autoComplete="off"
@@ -141,83 +198,94 @@ function PersonCard({ who, draft, onChange, autoFocus }: { who: 'a' | 'b'; draft
         />
       </label>
 
-      <p className="mt-5 text-sm font-medium">A few things they love</p>
-      <div className="mt-2 space-y-4">
-        {draft.favs.map((f, i) => (
-          <div key={i}>
-            <div className="flex items-center gap-2">
-              <div className="flex shrink-0 rounded-full border border-line bg-paper p-0.5" role="radiogroup" aria-label={`Kind of favourite ${i + 1}`}>
-                {TYPES.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={f.type === t.id}
-                    onClick={() => {
-                      setFav(i, { type: t.id, check: { state: 'idle' } });
-                      if (f.query.trim()) setTimeout(() => runCheck(i), 0);
+      {top}
+
+      {!hideFavs && (
+        <>
+          <p className="mt-5 text-sm font-medium">{who === 'a' ? 'Things you love' : `Things ${draft.name.trim() || 'they'} love${draft.name.trim() ? 's' : ''}`}</p>
+          <p className="text-[13px] text-muted">Any artist, film or TV show. One is enough; three is better.</p>
+          <div className="mt-2 space-y-4">
+            {draft.favs.map((f, i) => (
+              <div key={i}>
+                <div className="flex items-center gap-2">
+                  <input
+                    value={f.query}
+                    onChange={(e) => setFav(i, { query: e.target.value, check: { state: 'idle' } })}
+                    onBlur={() => runCheck(i)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        (e.target as HTMLInputElement).blur();
+                      }
                     }}
-                    className={`min-h-[36px] rounded-full px-2.5 text-[13px] font-medium transition ${f.type === t.id ? 'bg-ink text-white' : 'text-muted hover:text-ink'}`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
+                    placeholder={examples[i % 3]}
+                    aria-label={`Favourite ${i + 1}`}
+                    className="field min-w-0 flex-1"
+                    maxLength={60}
+                    autoComplete="off"
+                    enterKeyHint="done"
+                  />
+                  {draft.favs.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => onChange({ ...draft, favs: draft.favs.filter((_, j) => j !== i) })}
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted hover:bg-paper hover:text-ink"
+                      aria-label={`Remove favourite ${i + 1}`}
+                    >
+                      <X className="h-4 w-4" aria-hidden />
+                    </button>
+                  )}
+                </div>
+                <CheckLine check={f.check} onUse={(name, type) => setFav(i, { query: name, type, check: { state: 'found', name, type, alts: [] } })} />
               </div>
-              {draft.favs.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => onChange({ ...draft, favs: draft.favs.filter((_, j) => j !== i) })}
-                  className="ml-auto flex h-10 w-10 items-center justify-center rounded-full text-muted hover:bg-paper hover:text-ink"
-                  aria-label={`Remove favourite ${i + 1}`}
-                >
-                  <X className="h-4 w-4" aria-hidden />
-                </button>
-              )}
-            </div>
-            <input
-              value={f.query}
-              onChange={(e) => setFav(i, { query: e.target.value, check: { state: 'idle' } })}
-              onBlur={() => runCheck(i)}
-              placeholder={TYPES.find((t) => t.id === f.type)!.example[who === 'a' ? 0 : 1]}
-              aria-label={`Favourite ${i + 1}`}
-              className="field mt-2"
-              maxLength={60}
-              autoComplete="off"
-            />
-            <CheckLine check={f.check} onUse={(name) => setFav(i, { query: name, check: { state: 'found', name } })} />
+            ))}
           </div>
-        ))}
-      </div>
-      {draft.favs.length < MAX_FAVS && (
-        <button
-          type="button"
-          onClick={() => onChange({ ...draft, favs: [...draft.favs, blankFav(draft.favs.length === 1 ? 'urn:entity:movie' : 'urn:entity:tv_show')] })}
-          className="mt-3 inline-flex min-h-[44px] items-center gap-1.5 text-sm font-medium text-shared-ink"
-        >
-          <Plus className="h-4 w-4" aria-hidden /> Add another
-        </button>
+          {draft.favs.length < MAX_FAVS && (
+            <button
+              type="button"
+              onClick={() => onChange({ ...draft, favs: [...draft.favs, blankFav()] })}
+              className="mt-3 inline-flex min-h-[44px] items-center gap-1.5 text-sm font-medium text-shared-ink"
+            >
+              <Plus className="h-4 w-4" aria-hidden /> Add another
+            </button>
+          )}
+        </>
       )}
     </div>
   );
 }
 
+/** The second person adds their own favourites on their phone. A's half travels in the link. */
 function InvitePanel({ a, bName, minutes, avoid }: { a: Draft; bName: string; minutes: number; avoid: string }) {
   const [url, setUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const ready = a.favs.some((f) => f.query.trim());
-  const make = async () => {
+  const them = bName.trim() || 'them';
+  const fromName = a.name.trim() || 'Your friend';
+
+  // Build the link as soon as A has a favourite, and keep it up to date as they edit.
+  useEffect(() => {
+    if (!ready) return setUrl(null);
     const inv: Invite = {
       v: 1,
-      from: { name: a.name.trim() || 'Your friend', favs: a.favs.filter((f) => f.query.trim()).map((f) => ({ query: f.query.trim(), type: f.type })) },
+      from: { name: fromName, favs: a.favs.filter((f) => f.query.trim()).map((f) => ({ query: f.query.trim(), type: f.type })) },
       toName: bName.trim(),
       minutes,
-      avoid: avoid.split(',').map((s) => s.trim()).filter(Boolean)
+      avoid: avoid.split(',').map((x) => x.trim()).filter(Boolean)
     };
-    const link = inviteUrl(window.location.origin, inv);
-    setUrl(link);
-    const text = `${inv.from.name} wants to find something you'll both enjoy tonight. Add your favourites here:`;
+    setUrl(inviteUrl(window.location.origin, inv));
+  }, [a, bName, minutes, avoid, ready, fromName]);
+
+  const message = `${fromName} wants to find something you'll both enjoy tonight. Add a few things you love here (takes a minute):`;
+  const share = async () => {
+    if (!url) return;
     try {
-      if (navigator.share) await navigator.share({ text, url: link });
+      if (navigator.share) await navigator.share({ text: message, url });
+      else {
+        await navigator.clipboard.writeText(url);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
     } catch {
       /* closed */
     }
@@ -232,35 +300,34 @@ function InvitePanel({ a, bName, minutes, avoid }: { a: Draft; bName: string; mi
       /* ignore */
     }
   };
-  return (
-    <div className="rounded-3xl border border-dashed border-line bg-card/60 p-5">
-      <p className="text-[15px] font-medium">Not together right now?</p>
-      <p className="mt-1 text-sm text-muted">
-        Send {bName.trim() || 'them'} a link and they add their own favourites on their phone. Your half travels inside the link; nothing is stored on our server.
+
+  if (!ready)
+    return (
+      <p className="mt-4 rounded-2xl bg-paper p-3 text-sm text-muted">
+        Add at least one thing <span className="font-medium text-ink">you</span> love first (above). Then a link for {them} appears here.
       </p>
-      <button type="button" onClick={make} disabled={!ready} className="btn-quiet mt-3">
-        <Link2 className="h-4 w-4" aria-hidden /> Create a link for {bName.trim() || 'them'}
-      </button>
-      {!ready && <p className="mt-2 text-xs text-muted">Add at least one of your favourites first.</p>}
-      {url && (
-        <div className="mt-3 space-y-2">
-          <div className="flex items-center gap-2">
-            <input readOnly value={url} className="field min-w-0 flex-1 text-xs" aria-label="Invite link" onFocus={(e) => e.currentTarget.select()} />
-            <button type="button" onClick={copy} className="btn-quiet shrink-0" aria-label="Copy link">
-              {copied ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
-              {copied ? 'Copied' : 'Copy'}
-            </button>
-          </div>
-          <a
-            className="inline-flex min-h-[44px] items-center text-sm font-medium text-shared-ink underline underline-offset-2"
-            href={`https://wa.me/?text=${encodeURIComponent(`Add your favourites so we can plan tonight: ${url}`)}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Send on WhatsApp
-          </a>
-        </div>
-      )}
+    );
+  return (
+    <div className="mt-4 rounded-2xl bg-b-soft p-4">
+      <p className="text-[15px] font-medium text-ink">Send {them} this link</p>
+      <p className="mt-1 text-sm text-muted">They add their own favourites on their phone and get the plan straight away. Your favourites travel inside the link; nothing is stored on our server.</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <a
+          className="inline-flex min-h-[44px] items-center gap-2 rounded-full bg-[#25D366] px-4 text-sm font-semibold text-black"
+          href={`https://wa.me/?text=${encodeURIComponent(`${message} ${url}`)}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <Share2 className="h-4 w-4" aria-hidden /> WhatsApp
+        </a>
+        <button type="button" onClick={share} className="btn-quiet">
+          <Link2 className="h-4 w-4" aria-hidden /> Share
+        </button>
+        <button type="button" onClick={copy} className="btn-quiet" aria-label="Copy link">
+          {copied ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
+          {copied ? 'Copied' : 'Copy link'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -285,6 +352,7 @@ export function Setup({
   const [avoid, setAvoid] = useState(invite?.avoid.join(', ') || keep?.exclusions.join(', ') || '');
   const [country, setCountry] = useState(keep?.country || 'za');
   const [includeLocal, setIncludeLocal] = useState(keep?.includeLocal ?? true);
+  const [bMode, setBMode] = useState<'here' | 'link'>('here');
 
   // If the page receives an invite after first render (hash change), adopt it.
   useEffect(() => {
@@ -348,7 +416,39 @@ export function Setup({
         ) : (
           <PersonCard who="a" draft={a} onChange={setA} />
         )}
-        <PersonCard who="b" draft={b} onChange={setB} autoFocus={!!invite} />
+        <PersonCard
+          who="b"
+          draft={b}
+          onChange={setB}
+          autoFocus={!!invite}
+          hideFavs={!invite && bMode === 'link'}
+          top={
+            invite ? undefined : (
+              <>
+                <div className="mt-4 grid grid-cols-2 gap-1 rounded-full bg-paper p-1 text-sm font-medium" role="radiogroup" aria-label={`How ${b.name.trim() || 'they'} will add favourites`}>
+                  {(
+                    [
+                      ['here', 'They’re with me'],
+                      ['link', 'Send them a link']
+                    ] as const
+                  ).map(([k, label]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      role="radio"
+                      aria-checked={bMode === k}
+                      onClick={() => setBMode(k)}
+                      className={`min-h-[40px] rounded-full px-2 ${bMode === k ? 'bg-ink text-white' : 'text-muted hover:text-ink'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {bMode === 'link' && <InvitePanel a={a} bName={b.name} minutes={minutes} avoid={avoid} />}
+              </>
+            )
+          }
+        />
       </div>
 
       <section className="grid gap-5 rounded-3xl border border-line bg-card p-5 sm:grid-cols-2" aria-label="Your evening">
@@ -371,6 +471,13 @@ export function Setup({
             ))}
           </div>
         </div>
+        <details className="group sm:col-span-2">
+          <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-1.5 text-sm font-medium text-shared-ink">
+            More options
+            <ChevronDown className="h-4 w-4 transition group-open:rotate-180" aria-hidden />
+            <span className="ml-1 truncate text-[13px] font-normal text-muted">Avoid list, country, Mzansi</span>
+          </summary>
+          <div className="mt-3 grid gap-5 sm:grid-cols-2">
         <label className="block">
           <span className="text-sm font-medium">Anything to avoid? (optional)</span>
           <input value={avoid} onChange={(e) => setAvoid(e.target.value)} placeholder="e.g. horror, war" className="field mt-2" maxLength={80} />
@@ -392,10 +499,15 @@ export function Setup({
             <span className="text-muted"> (South African artists, when Qloo finds a local thread in your shared taste)</span>
           </span>
         </label>
+          </div>
+        </details>
       </section>
 
-      {!invite && <InvitePanel a={a} bName={b.name} minutes={minutes} avoid={avoid} />}
-
+      {!invite && bMode === 'link' ? (
+        <p className="rounded-2xl bg-card p-4 text-sm text-muted">
+          Once {b.name.trim() || 'they'} add{b.name.trim() ? 's' : ''} their favourites from your link, the plan opens on their phone. They can send you the room link from there to swipe together.
+        </p>
+      ) : (
       <div className="flex flex-col items-start gap-3">
         <button
           type="button"
@@ -413,6 +525,7 @@ export function Setup({
           {missing || 'Your names stay in this app. Your favourites go to Qloo and, for planning, to Google’s Gemini.'}
         </p>
       </div>
+      )}
 
       <div className="flex items-center gap-2 pt-2 text-xs text-muted">
         <Mark size={14} /> Powered by Qloo’s taste graph

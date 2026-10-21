@@ -51,6 +51,7 @@ function cleanFavourite(f: unknown, i: number): Favourite | null {
     if (f.qlooName) out.qlooName = cleanText(f.qlooName, 120);
     if (typeof f.image === 'string' && /^https:\/\//.test(f.image)) out.image = f.image.slice(0, 500);
     if (Array.isArray(f.tags)) out.tags = f.tags.slice(0, 60).map((t: unknown) => cleanText(t, 60)).filter(Boolean);
+    if (Array.isArray(f.tagIds)) out.tagIds = f.tagIds.filter((t: unknown) => typeof t === 'string' && /^urn:tag:[a-z0-9_:.-]{1,120}$/.test(t)).slice(0, 12);
   }
   if (f.unmatched === true) out.unmatched = true;
   return out;

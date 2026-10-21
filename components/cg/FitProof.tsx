@@ -51,6 +51,13 @@ export function FitProof({ pick, names }: { pick: Pick; names: [string, string] 
         ))}
       </dl>
 
+      {rows.some((r) => r.f!.via === 'tags') && (
+        <p className="mt-2 text-xs text-muted">
+          {rows.filter((r) => r.f!.via === 'tags').map((r) => r.name).join(' and ')}’s rank comes from the tags of their favourites, because Qloo has no direct score
+          across these kinds (for example, films for someone who only added music).
+        </p>
+      )}
+
       {fit.share && (
         <div className="mt-3">
           <p className="text-xs text-muted">Each person’s share of the signal behind this pick (Qloo explainability)</p>

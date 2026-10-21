@@ -11,6 +11,7 @@ import { LinkRow, linksFor, Ratings, SpotifyPlayer } from './Links';
 import { StoryViewer } from './Stories';
 import { Sparkles, Users } from 'lucide-react';
 import { roomItemsFrom } from '../../lib/cg/room-items';
+import { FeedbackPrompt } from './Feedback';
 
 function meta(p: Pick) {
   const bits: string[] = [typeLabel(p.type)];
@@ -84,9 +85,11 @@ function PickBlock({
       <FitProof pick={pick} names={names} />
       {pick.type.includes('artist') && <SpotifyPlayer spotifyId={pick.external?.spotifyId} name={pick.name} />}
       <LinkRow links={linksFor(pick, country)} />
-      <p className="mt-2 text-[12px] text-muted" title={pick.provenance === 'qloo_saved' && pick.capturedAt ? `Saved ${pick.capturedAt.slice(0, 10)}` : undefined}>
-        {pick.provenance === 'qloo_live' ? 'From Qloo just now' : 'From a saved Qloo response'}
-      </p>
+      {pick.provenance === 'qloo_saved' && (
+        <p className="mt-2 text-[12px] text-muted" title={pick.capturedAt ? `Saved ${pick.capturedAt.slice(0, 10)}` : undefined}>
+          From a saved Qloo response (Qloo was busy)
+        </p>
+      )}
       {rate && <VerdictButtons pick={pick} value={verdict} onChange={setVerdict} names={names} />}
     </article>
   );
@@ -360,6 +363,8 @@ export function PlanView({
           </ul>
         </section>
       )}
+
+      {picks.length > 0 && <FeedbackPrompt session={session} />}
 
       {picks.length > 0 && (
         <section className="sticky bottom-3 z-10 rounded-3xl border border-line bg-card/95 p-4 shadow-[0_8px_30px_rgba(29,26,43,0.12)] backdrop-blur">

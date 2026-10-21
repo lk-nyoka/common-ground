@@ -257,6 +257,9 @@ function normaliseEntity(e: any, fallbackType?: string): QlooEntity | null {
     activeTo: toYear(props.end_year),
     image: typeof props.image?.url === 'string' ? props.image.url : placeImage,
     tags: Array.isArray(e.tags) ? e.tags.map((t: any) => t?.name).filter(Boolean) : undefined,
+    tagIds: Array.isArray(e.tags)
+      ? e.tags.map((t: any) => t?.id || t?.tag_id).filter((t: unknown) => typeof t === 'string' && /^urn:tag:[a-z0-9_:.-]{1,120}$/.test(t)).slice(0, 12)
+      : undefined,
     contentRating: typeof props.content_rating === 'string' ? props.content_rating : undefined,
     description: props.short_description || props.description || e.disambiguation || undefined,
     popularity: typeof e.popularity === 'number' ? e.popularity : undefined,
@@ -365,12 +368,22 @@ export async function qlooCompare(aIds: string[], bIds: string[], take = 12): Pr
  * who like `signalIds`. Uses filter.results.entities (verified on the hackathon API, Oct 2026).
  * Returns a map of entity id -> affinity (0-1). Candidates Qloo doesn't score are absent.
  */
-export async function qlooScore(signalIds: string[], targetType: string, candidateIds: string[]): Promise<QlooResult<Record<string, number>>> {
+/**
+ * Qloo affinity of each candidate for one person's favourites. With `bySignalTags`, the signal is
+ * the favourites' tags instead of the favourites themselves: Qloo gives no film affinity for a
+ * music-only signal (checked on the hackathon API, Oct 2026), but it does for the artist's tags.
+ */
+export async function qlooScore(
+  signalIds: string[],
+  targetType: string,
+  candidateIds: string[],
+  opts: { bySignalTags?: boolean } = {}
+): Promise<QlooResult<Record<string, number>>> {
   const ids = Array.from(new Set(candidateIds)).slice(0, 50);
   if (!signalIds.length || !ids.length) return { source: 'unavailable', data: {}, error: 'nothing to score' };
   const res = await qlooGet('/v2/insights', {
     'filter.type': targetType,
-    'signal.interests.entities': signalIds.join(','),
+    [opts.bySignalTags ? 'signal.interests.tags' : 'signal.interests.entities']: signalIds.join(','),
     'filter.results.entities': ids.join(','),
     take: String(ids.length)
   });

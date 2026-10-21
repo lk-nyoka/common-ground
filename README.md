@@ -73,6 +73,7 @@ When two people with different tastes choose together, one of three things usual
 - **Where to watch or listen.** Cards open the exact Netflix title or Spotify artist when Qloo links one, plus a JustWatch search for your country, a trailer search and IMDb. Ratings from IMDb, Rotten Tomatoes and Metacritic come from Qloo. Artists can be played in a Spotify player on the page. We don't check availability ourselves; the links take you to services that do.
 - **Swipe together, live.** For when you can't decide: a room with a link for each phone. Each person swipes on tonight's picks, and a pick both say yes to becomes a match on both screens at once. No second phone? Open the other side in a new tab. A swipe means "I'd consider it tonight"; the after-the-night rating is what the agent learns from.
 - **Start together.** From a match, both phones count down to the same second on the server's clock, then show a shared timer with "pause for both" and reactions. It can't control Netflix or Spotify: each person presses play themselves.
+- **Quick feedback for testers.** After a plan, a five-tap check-in (emoji answers that move on by themselves, plus an optional note). No names or favourites are sent.
 - **Story cards.** "Play our story" turns the plan into 1080×1920 cards (your common ground, the bridge film with both ranks, your Mzansi match, the swap) to share to WhatsApp or Instagram, or save.
 
 ## 3. Try it in 60 seconds
@@ -275,6 +276,8 @@ Both keys are optional. Without them the app still runs and says what's missing.
 | `KEEP_AWAKE` | No | on (Render only) | Set to `false` to stop the self-ping on Render. |
 | `PREWARM` | No | on (Render only) | When the server starts, and every 5 hours, it plans the two example pairs once with Qloo only, filling its cache so examples are fast. `false` turns this off; `true` turns it on elsewhere. |
 | `QLOO_CONCURRENCY` | No | `3` | How many Qloo calls run at once. |
+| `FEEDBACK_KEY` | No | none | Any secret. Turns on the owner's feedback summary at `/feedback?key=…`. |
+| `FEEDBACK_WEBHOOK_URL` | No | none | Where tester feedback is also sent, so it survives restarts. A Discord webhook gets a readable message; any other https URL gets the JSON. |
 
 **Timeouts:**
 - Each Qloo call times out after 8 s.
@@ -325,7 +328,7 @@ Free Render services sleep after about 15 minutes without visits, and waking one
 
 | Command | What it does |
 | --- | --- |
-| `npm test` | 25 tests with Qloo and Gemini faked; no keys needed (planner, fairness, Mzansi lane, invite links, study, and live rooms) |
+| `npm test` | 28 tests with Qloo and Gemini faked; no keys needed (planner, fairness, Mzansi lane, invite links, study, and live rooms) |
 | `npm run typecheck` | TypeScript check of the app |
 | `npm run test:live` | Plans the two example pairs against the real APIs and prints the proof for every pick |
 | `npm run eval` | The Qloo vs AI-alone evaluation ([docs/EVALUATION.md](docs/EVALUATION.md)) |
@@ -353,6 +356,7 @@ The tests check that:
 | `POST /api/room` | `{ names, items }` | `{ id }` for a new live room. The other person opens `/room/{id}?p=b`. |
 | `GET /api/room/{id}`, `POST /api/room/{id}` | `{ who, type: "swipe" \| "party_start" \| "party_pause" \| "party_resume" \| "party_end" \| "react", … }` | The room, with `serverNow` so both phones can line up the countdown. |
 | `GET /api/room/{id}/events?p=a\|b` | none | Server-sent events: the room each time it changes. |
+| `POST /api/feedback`, `GET /api/feedback?key=` | `{ ease, fit, liked, again, comment, context }` | Saves tester feedback; the summary needs `FEEDBACK_KEY`. |
 | `GET /api/img?u=` | none | Qloo artwork served from our own site, so story cards can be drawn and saved. Only `images.qloo.com` is allowed. |
 | `GET /api/status` | none | `{ qloo: { keySet, savedResponses }, llm: { configured, model } }`. Never returns the keys. |
 | `GET /api/qloo/search`, `GET /api/qloo/insights` | query parameters | Raw Qloo helpers, used by the setup form and Gentle visit |

@@ -21,7 +21,7 @@ const ent = (id: string, name: string, type: string, tags: string[] = [], extra:
   type: 'urn:entity',
   subtype: type,
   types: [type],
-  tags: tags.map((t) => ({ name: t })),
+  tags: tags.map((t) => ({ name: t, id: `urn:tag:genre:${t.toLowerCase()}` })),
   properties: { image: { url: `https://img.example/${id}.jpg` }, ...extra }
 });
 
@@ -40,6 +40,7 @@ const DEFAULT_AFF = (): Record<string, Record<string, number>> => ({
   'ART-TS': { 'ART-SA1': 0.6, 'ART-SA2': 0.9, 'ART-SA3': 0.62, 'MOV-1': 0.4, 'MOV-3': 0.85, 'MOV-5': 0.7, 'TV-1': 0.75, 'ART-1': 0.9, 'ART-2': 0.4, 'ART-3': 0.95, 'ART-4': 0.45, 'ART-9': 0.65, 'ART-12': 0.2 }
 });
 let gemini: ((body: any) => any) | null = null;
+const NO_SCORE = new Set<string>();
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
@@ -64,9 +65,11 @@ function installFetch() {
       }
       if (u.pathname === '/v2/insights' && u.searchParams.get('filter.results.entities')) {
         const type = u.searchParams.get('filter.type') || '';
-        const signal = u.searchParams.get('signal.interests.entities') || '';
+        const signal = u.searchParams.get('signal.interests.entities') || u.searchParams.get('signal.interests.tags') || '';
         const ids = (u.searchParams.get('filter.results.entities') || '').split(',');
         const table = AFF[signal] || {};
+        // Like the real API: a signal with no cross-domain data returns the entities without affinity.
+        if (NO_SCORE.has(`${signal}|${type}`)) return json({ success: true, results: { entities: ids.map((id) => ent(id, id, type)) } });
         return json({ success: true, results: { entities: ids.map((id) => ({ ...ent(id, id, type), query: { affinity: table[id] ?? 0.5 } })) } });
       }
       if (u.pathname === '/v2/insights' && u.searchParams.get('filter.tags') === 'urn:tag:genre:music:south_africa') {
@@ -208,7 +211,8 @@ test('Mutual Fit Proof: every pick carries both people\'s ranks and the explaina
   assert.equal(w.fit!.of, 3);
   assert.equal(w.fit!.share?.a, 0.6);
   assert.equal(w.fit!.share?.b, 0.4);
-  assert.match(w.reason, /#\d+ of \d+ for Thabo's taste and #\d+ for Naledi's/);
+  // The ranks are on the card; the rules note explains them in words without repeating numbers.
+  assert.match(w.reason, /both of you|leans away from/);
 });
 
 test('fair music: picks favour artists that suit both, not one person\'s favourites', async () => {
@@ -392,4 +396,20 @@ test('"top half for both" is judged on ranks, so #4 of 5 never counts as suiting
   assert.equal(topHalfForBoth(f(3, 2, 5)), true);
   assert.equal(topHalfForBoth(f(2, 2, 3)), true);
   assert.equal(topHalfForBoth(undefined), false);
+});
+
+test('a music-only favourite still gets a film rank, scored from its Qloo tags, and the trace says so', async () => {
+  NO_SCORE.add('ART-MET|urn:entity:movie');
+  AFF['urn:tag:genre:energetic,urn:tag:genre:melodic,urn:tag:genre:rock'] = { 'MOV-1': 0.6, 'MOV-3': 0.9, 'MOV-5': 0.7 };
+  try {
+    const s = await planNight(sample());
+    const w = s.plans[0].watch!;
+    assert.ok(w.fit?.a, 'Thabo has a rank for the film');
+    assert.equal(w.fit?.a?.via, 'tags');
+    assert.equal(w.fit?.b?.via, undefined);
+    assert.ok(s.plans[0].trace.some((t) => t.action === 'Scored across domains'));
+    assert.ok(calls.some((c) => c.url.includes('signal.interests.tags=')));
+  } finally {
+    NO_SCORE.clear();
+  }
 });

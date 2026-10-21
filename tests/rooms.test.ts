@@ -67,3 +67,24 @@ test('the store tells listeners about changes and exposes presence and the serve
   assert.equal(typeof view.serverNow, 'number');
   assert.throws(() => act('missing-room', { type: 'hello', who: 'a' }), /expired/);
 });
+
+// ---------- tester feedback ----------
+import { cleanFeedback, discordText, feedbackSummary, resetFeedback, saveFeedback } from '../lib/server/feedback';
+
+test('feedback keeps only known answers and never more than a short note', async () => {
+  resetFeedback();
+  assert.equal(cleanFeedback({}), null);
+  const f = cleanFeedback({ ease: 4, fit: 'both', liked: ['mzansi', 'hack', 'mzansi'], again: 'maybe', comment: 'x'.repeat(900), context: { planNumber: 2, sample: true, page: 'plan', evil: 1 } })!;
+  assert.equal(f.ease, 4);
+  assert.deepEqual(f.liked, ['mzansi']);
+  assert.equal(f.comment!.length, 600);
+  assert.equal((f.context as any).evil, undefined);
+  assert.equal(cleanFeedback({ ease: 9, fit: 'lots' }), null);
+  delete process.env.FEEDBACK_WEBHOOK_URL;
+  await saveFeedback(f);
+  const s = feedbackSummary();
+  assert.equal(s.responses, 1);
+  assert.equal(s.meanEase, 4);
+  assert.equal(s.picks.both, 1);
+  assert.match(discordText(f), /★★★★☆/);
+});

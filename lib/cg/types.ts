@@ -12,6 +12,7 @@ export interface Favourite {
   qlooName?: string;
   image?: string;
   tags?: string[]; // the entity's own Qloo tags, used to verify shared tags
+  tagIds?: string[]; // their Qloo ids: a fallback signal when Qloo has no cross-domain score
   unmatched?: boolean; // Qloo found no close match
 }
 
@@ -32,6 +33,9 @@ export interface PersonFit {
   /** 0-1 position on this person's own scale (their best candidate = 1, worst = 0). Scale-free, so
    * a favourite whose fans score everything lower can't dominate. */
   norm: number;
+  /** 'tags': scored from the person's favourites' tags, because Qloo had no direct score across
+   * domains (for example films for someone who only listed music). */
+  via?: 'tags';
 }
 
 /** The evidence that a pick suits both people. Every number comes from Qloo. */

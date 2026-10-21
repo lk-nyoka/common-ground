@@ -78,11 +78,25 @@ async function resolveFavourites(run: Run, session: Session) {
       results[i] = await qlooSearch(jobs[i].fav.query, jobs[i].fav.type, 5);
     }
   }
+  // No exact match in the kind they chose? Try the other two kinds ("The Office" as a TV show).
+  const KINDS = ['urn:entity:artist', 'urn:entity:movie', 'urn:entity:tv_show'] as const;
+  const other = await Promise.all(
+    results.map(async (res, i) => {
+      const fav = jobs[i].fav;
+      if (res.source === 'unavailable' || res.data.some((e) => namesMatch(e.name, fav.query))) return undefined;
+      const tries = await Promise.all(KINDS.filter((k) => k !== fav.type).map((k) => qlooSearch(fav.query, k, 5)));
+      return tries.flatMap((t) => t.data).find((e) => namesMatch(e.name, fav.query));
+    })
+  );
   results.forEach((res, i) => {
     const fav = jobs[i].fav;
     run.note(res.source, res.capturedAt, res.error);
-    const match = res.data.find((e) => namesMatch(e.name, fav.query));
+    let match = res.data.find((e) => namesMatch(e.name, fav.query));
     run.add('tool_call', 'qloo_search', `qloo_search(query="${fav.query}", type="${fav.type}")`);
+    if (!match && other[i]) {
+      match = other[i];
+      fav.type = match.type as Favourite['type'];
+    }
     if (res.source === 'unavailable') {
       run.add('tool_result', 'qloo_search result', `No answer: ${res.error || 'unavailable'}.`);
       return;
@@ -92,6 +106,7 @@ async function resolveFavourites(run: Run, session: Session) {
       fav.qlooName = match.name;
       fav.image = match.image;
       fav.tags = match.tags;
+      fav.tagIds = match.tagIds;
       run.add('tool_result', 'qloo_search result', `Matched "${match.name}" (${short(match.type)}) [${tag(res.source, res.capturedAt)}].`);
     } else {
       fav.unmatched = true;
@@ -183,9 +198,33 @@ async function related(
 type ScoreJob = { list: QlooEntity[]; type: string; who: ('a' | 'b')[] };
 
 /** Score one or more candidate lists for each person (filter.results.entities). Returns counts. */
-async function scoreJobs(run: Run, pools: Pools, jobs: ScoreJob[], aSig: string[], bSig: string[]) {
+/** Each person's favourites' tag ids, for scoring across domains. */
+function tagSignalsOf(p: Person): string[] {
+  return Array.from(new Set(p.favourites.flatMap((f) => (f.qlooEntityId ? (f.tagIds || []).slice(0, 6) : [])))).slice(0, 12);
+}
+
+async function scoreJobs(run: Run, pools: Pools, jobs: ScoreJob[], aSig: string[], bSig: string[], tagSig: { a: string[]; b: string[] } = { a: [], b: [] }) {
   const calls = jobs.filter((j) => j.list.length > 0).flatMap((j) => j.who.map((w) => ({ job: j, who: w })));
   const results = await Promise.all(calls.map((c) => qlooScore(c.who === 'a' ? aSig : bSig, c.job.type, c.job.list.map((e) => e.id))));
+  // Qloo gives no direct score across some domains (films for a music-only favourite). Then score
+  // that person again from their favourites' tags, and mark it, so every pick still has a rank for both.
+  const viaTags = new Set<number>();
+  await Promise.all(
+    results.map(async (res, i) => {
+      const { job, who } = calls[i];
+      const tags = tagSig[who];
+      if (res.source === 'unavailable' || Object.keys(res.data).length || !tags.length) return;
+      const again = await qlooScore(tags, job.type, job.list.map((e) => e.id), { bySignalTags: true });
+      if (Object.keys(again.data).length) {
+        results[i] = again;
+        viaTags.add(i);
+      }
+    })
+  );
+  if (viaTags.size) {
+    const who = Array.from(new Set(Array.from(viaTags).map((i) => calls[i].who)));
+    run.add('guardrail', 'Scored across domains', `Qloo has no direct score for these ${short(calls[Array.from(viaTags)[0]].job.type)}s from ${who.length === 2 ? 'either of your' : 'one person’s'} favourites, so they were scored from the favourites' own Qloo tags instead.`);
+  }
   let scored = 0;
   results.forEach((res, i) => {
     const { job, who } = calls[i];
@@ -197,6 +236,7 @@ async function scoreJobs(run: Run, pools: Pools, jobs: ScoreJob[], aSig: string[
     ranked.forEach((e, idx) => {
       const fit = pools.fit.get(e.id) || { of: job.list.length };
       const pf: PersonFit = { affinity: res.data[e.id], rank: idx + 1, norm: hi > lo ? (res.data[e.id] - lo) / (hi - lo) : 0.5 };
+      if (viaTags.has(i)) pf.via = 'tags';
       fit[who] = pf;
       fit.of = job.list.length;
       pools.fit.set(e.id, fit);
@@ -576,15 +616,17 @@ function fillGaps(run: Run, choice: Choice, rules: Choice): Choice {
 /** A reason built only from Qloo evidence, used when the planner gave none. Never overstates. */
 function jointReason(fit: PickFit | undefined, session: Session, tagLine?: string) {
   const [A, B] = session.people;
+  const lean = tagLine ? ` You both lean ${tagLine}.` : '';
+  // The ranks themselves are on the card, so the note says what they mean instead of repeating them.
   if (fit?.a && fit?.b) {
-    const ranks = `#${fit.a.rank} of ${fit.of} for ${A.name}'s taste and #${fit.b.rank} for ${B.name}'s`;
-    return fit.a.norm >= 2 / 3 && fit.b.norm >= 2 / 3
-      ? `A strong match for you both: ${ranks}.`
+    const lowFor = fit.a.rank > fit.b.rank ? A.name : B.name;
+    return fit.a.norm >= 2 / 3 && fit.b.norm >= 2 / 3 && topHalfForBoth(fit)
+      ? `Qloo ranks this near the top for both of you.${lean}`
       : topHalfForBoth(fit)
-      ? `In the top half for both of you: ${ranks}.`
-      : `The most even of tonight's options, though lower for one of you: ${ranks}.`;
+      ? `A good fit for both of you on Qloo's ranks.${lean}`
+      : `The most even option tonight, though it leans away from ${lowFor}'s taste.${lean}`;
   }
-  return `Qloo found it from both your favourites together${tagLine ? `; you both lean ${tagLine}` : ''}.`;
+  return `Qloo found it from both your favourites together.${lean}`;
 }
 
 /** Put names back in. Also catches the model writing "A's" or "for B" without braces. */
@@ -623,6 +665,7 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
 
   const aSig = signalsOf(A);
   const bSig = signalsOf(B);
+  const tagSig = { a: tagSignalsOf(A), b: tagSignalsOf(B) };
   const pools: Pools = { movies: [], tv: [], artists: [], aWorld: [], bWorld: [], local: [], sourceOf: new Map(), fit: new Map() };
   let tags: SharedTag[] = [];
 
@@ -632,11 +675,11 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
     // Pipelined: each list is scored for both people as soon as Qloo returns it.
     const films = related(run, session, label, both, 'urn:entity:movie', 30, pools, { explain: true }).then((list) => {
       pools.movies = list;
-      return scoreJobs(run, pools, [{ list, type: 'urn:entity:movie', who: ['a', 'b'] }], aSig, bSig);
+      return scoreJobs(run, pools, [{ list, type: 'urn:entity:movie', who: ['a', 'b'] }], aSig, bSig, tagSig);
     });
     const shows = related(run, session, label, both, 'urn:entity:tv_show', 10, pools, { explain: true }).then((list) => {
       pools.tv = list;
-      return scoreJobs(run, pools, [{ list, type: 'urn:entity:tv_show', who: ['a', 'b'] }], aSig, bSig);
+      return scoreJobs(run, pools, [{ list, type: 'urn:entity:tv_show', who: ['a', 'b'] }], aSig, bSig, tagSig);
     });
     const music = Promise.all([
       related(run, session, label, both, 'urn:entity:artist', 12, pools, { explain: true }),
@@ -655,14 +698,15 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
           { list: pools.aWorld, type: 'urn:entity:artist', who: ['b'] }
         ],
         aSig,
-        bSig
+        bSig,
+        tagSig
       );
     });
     // South African artists for both tastes: Qloo's South Africa music tag on the joint signal.
     const local = session.includeLocal
       ? related(run, session, `${label}, South African artists`, both, 'urn:entity:artist', 12, pools, { tags: SA_MUSIC_TAG }).then((list) => {
           pools.local = list;
-          return scoreJobs(run, pools, [{ list, type: 'urn:entity:artist', who: ['a', 'b'] }], aSig, bSig);
+          return scoreJobs(run, pools, [{ list, type: 'urn:entity:artist', who: ['a', 'b'] }], aSig, bSig, tagSig);
         })
       : Promise.resolve({ calls: 0, scored: 0 });
     const [cmp, ...counts] = await Promise.all([qlooCompare(aSig, bSig, 12), films, shows, music, local]);

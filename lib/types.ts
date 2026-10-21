@@ -138,6 +138,7 @@ export interface QlooEntity {
   activeTo?: number;
   image?: string; // Qloo artwork URL
   tags?: string[]; // tag names on the entity (search results include these)
+  tagIds?: string[]; // the same tags' Qloo ids, used as a fallback signal
   contentRating?: string;
   description?: string;
   popularity?: number;
