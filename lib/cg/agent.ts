@@ -570,7 +570,8 @@ function critic(run: Run, session: Session, pools: Pools, choice: Choice): Choic
   run.add('guardrail', 'Replaced an unfair pick', `${name(choice.watchId)} ranked in the bottom half for ${lowFor}, so ${better.name}, which is in the top half for both of you, is tonight's pick instead.`);
   const reasons = { ...choice.reasons };
   delete reasons[choice.watchId!];
-  return { ...choice, watchId: better.id, alsoIds: choice.alsoIds.filter((id) => id !== better.id), reasons };
+  // The AI's summary and 'why' lines described its own pick, so they're rebuilt from the evidence instead.
+  return { ...choice, watchId: better.id, alsoIds: choice.alsoIds.filter((id) => id !== better.id), reasons, tonight: undefined, why: undefined };
 }
 
 /** If the AI left a slot empty, fill it from the fair rules ranking, so every plan is complete. */

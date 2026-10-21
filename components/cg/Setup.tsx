@@ -436,7 +436,7 @@ export function Setup({
   return (
     <div className="space-y-7">
       <section className="pt-4 sm:pt-8">
-        <h1 className="max-w-xl text-[2.5rem] font-semibold leading-[1.05] sm:text-6xl">
+        <h1 className="max-w-xl text-[2.1rem] font-semibold leading-[1.05] sm:text-6xl">
           {invite ? `${invite.from.name} wants to plan a night with you.` : 'Two tastes. One night you’ll both enjoy.'}
         </h1>
         <p className="mt-4 max-w-lg text-[17px] leading-relaxed text-muted">

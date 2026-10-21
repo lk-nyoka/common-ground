@@ -72,7 +72,7 @@ export function Chat({ view, me, send }: { view: PairView; me: 'a' | 'b'; send: 
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="fixed bottom-[11.5rem] right-4 z-30 flex h-12 items-center gap-2 rounded-full bg-shared px-4 font-semibold text-white shadow-lg hover:bg-shared-ink sm:bottom-32"
+        className="fixed bottom-[5.5rem] right-4 z-30 flex h-12 items-center gap-2 rounded-full bg-shared px-4 font-semibold text-white shadow-lg hover:bg-shared-ink sm:bottom-24"
         aria-label={`Chat with ${them}${unread ? `, ${unread} new` : ''}`}
       >
         <MessageCircle className="h-5 w-5" aria-hidden />

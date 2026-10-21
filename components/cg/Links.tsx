@@ -24,7 +24,7 @@ export function linksFor(p: Pick, country: string): LinkOption[] {
   }
   if (ext.netflixId) out.push({ label: 'Open on Netflix', url: `https://www.netflix.com/title/${ext.netflixId}`, primary: true });
   out.push({
-    label: country === 'za' ? 'Where to stream in South Africa' : 'Where to stream',
+    label: 'Where to watch',
     url: `https://www.justwatch.com/${country}/search?q=${enc(p.name)}`,
     primary: !ext.netflixId
   });
@@ -51,16 +51,16 @@ export function Ratings({ pick }: { pick: Pick }) {
   );
 }
 
-export function LinkRow({ links }: { links: LinkOption[] }) {
+export function LinkRow({ links, scroll = false }: { links: LinkOption[]; scroll?: boolean }) {
   return (
-    <div className="mt-2 flex flex-wrap gap-2">
+    <div className={`mt-2 flex gap-2 ${scroll ? '-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : 'flex-wrap'}`}>
       {links.map((l) => (
         <a
           key={l.url}
           href={l.url}
           target="_blank"
           rel="noreferrer"
-          className={`inline-flex min-h-[36px] items-center gap-1 rounded-full px-3 text-[13px] font-medium ${
+          className={`inline-flex min-h-[36px] shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-3 text-[13px] font-medium ${
             l.primary ? 'bg-ink text-white hover:bg-ink/85' : 'border border-line text-ink hover:border-ink/30'
           }`}
         >

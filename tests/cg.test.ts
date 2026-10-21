@@ -266,9 +266,12 @@ test('LLM mode: names stay out of the prompt and invented picks are ignored', as
 
 test('critic: an AI pick that is unfair to one person is replaced, and the trace says why', async () => {
   process.env.GEMINI_API_KEY = 'test-gemini';
-  gemini = () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ watch_id: 'MOV-1', listen_ids: ['ART-1'] }) }] } }] });
+  gemini = () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ watch_id: 'MOV-1', listen_ids: ['ART-1'], tonight: '{A} and {B} watch Titanic tonight.' }) }] } }] });
   const s = await planNight(sample());
   assert.equal(s.plans[0].watch?.name, 'Notting Hill');
+  // The AI's summary named its own pick, so it must not survive the swap.
+  assert.ok(!s.plans[0].tonight.includes('Titanic'));
+  assert.ok(s.plans[0].tonight.includes('Notting Hill'));
   assert.ok(s.plans[0].trace.some((t) => t.action === 'Replaced an unfair pick' && /Titanic ranked in the bottom half for Naledi/.test(t.details)));
 });
 
