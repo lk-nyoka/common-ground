@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, Copy, Link2, Loader2, Plus, Share2, X } from 'lucide-react';
 import type { FavouriteType, Person, Session } from '../../lib/cg/types';
 import { fav, newSession, person, SAMPLE_PAIRS } from '../../lib/cg/samples';
-import { namesMatch } from '../../lib/cg/match';
+import { fold, namesMatch } from '../../lib/cg/match';
 import { type Invite, inviteUrl } from '../../lib/cg/invite';
 import { Art, Mark, minutesLabel } from './ui';
 
@@ -79,10 +79,15 @@ async function checkFavourite(query: string, preferred: FavouriteType): Promise<
     const exact = all.filter((r) => namesMatch(r.name, query));
     if (exact.length) {
       // One best match per kind, then the most popular kind first (ties go to the kind they chose).
-      const perType = TYPES.map((t) => exact.filter((e) => e.type === t.id).sort((x, y) => (y.popularity ?? 0) - (x.popularity ?? 0))[0]).filter(Boolean) as typeof exact;
-      perType.sort((x, y) => (y.popularity ?? 0) - (x.popularity ?? 0) || (x.type === preferred ? -1 : y.type === preferred ? 1 : 0));
-      const [best, ...rest] = perType;
-      return { state: 'found', name: best.name, image: best.image, type: best.type, alts: rest.map((e) => ({ name: e.name, type: e.type })) };
+      // Exactly what they typed beats a longer name ("Tyla" over "Tyla Yaweh"); then popularity,
+      // then the kind they chose.
+      const q = fold(query);
+      const score = (e: (typeof exact)[number]) => (fold(e.name) === q ? 10 : 0) + (e.popularity ?? 0) + (e.type === preferred ? 0.001 : 0);
+      const ranked = [...exact].sort((x, y) => score(y) - score(x));
+      const seen = new Set<string>();
+      const distinct = ranked.filter((e) => !seen.has(`${fold(e.name)}|${e.type}`) && !!seen.add(`${fold(e.name)}|${e.type}`));
+      const [best, ...rest] = distinct;
+      return { state: 'found', name: best.name, image: best.image, type: best.type, alts: rest.slice(0, 3).map((e) => ({ name: e.name, type: e.type })) };
     }
     const seen = new Set<string>();
     const options = all
@@ -116,7 +121,7 @@ function CheckLine({ check, onUse }: { check: Check; onUse: (name: string, type:
           <p className="mt-1 flex flex-wrap items-center gap-1.5 text-muted">
             Not that one?
             {check.alts.map((a) => (
-              <button key={a.type} type="button" className="min-h-[32px] rounded-full border border-line px-2.5 font-medium text-ink" onClick={() => onUse(a.name, a.type)}>
+ <button key={`${a.name}|${a.type}`} type="button" className="min-h-[32px] rounded-full border border-line px-2.5 font-medium text-ink" onClick={() => onUse(a.name, a.type)}>
                 {a.name} ({typeLabel(a.type)})
               </button>
             ))}
@@ -152,7 +157,8 @@ function PersonCard({
   onChange,
   autoFocus,
   top,
-  hideFavs
+  hideFavs,
+  self
 }: {
   who: 'a' | 'b';
   draft: Draft;
@@ -160,6 +166,7 @@ function PersonCard({
   autoFocus?: boolean;
   top?: React.ReactNode; // shown under the name: for the second person, the "send a link" choice
   hideFavs?: boolean;
+  self?: boolean; // this card belongs to whoever is holding the phone (the invited person)
 }) {
   const latest = useRef(draft);
   latest.current = draft;
@@ -178,7 +185,8 @@ function PersonCard({
 
   const tone = who === 'a' ? 'border-t-a' : 'border-t-b';
   const dot = who === 'a' ? 'bg-a' : 'bg-b';
-  const label = who === 'a' ? 'You' : 'The other person';
+  const mine = who === 'a' || self;
+  const label = mine ? 'You' : 'The other person';
   const examples = who === 'a' ? ['e.g. Miriam Makeba', 'e.g. Black Panther', 'e.g. Abbott Elementary'] : ['e.g. Tyla', 'e.g. The Notebook', "e.g. Grey's Anatomy"];
 
   return (
@@ -190,7 +198,7 @@ function PersonCard({
         <input
           value={draft.name}
           onChange={(e) => onChange({ ...draft, name: e.target.value })}
-          placeholder={who === 'a' ? 'Your first name' : 'Their first name'}
+          placeholder={mine ? 'Your first name' : 'Their first name'}
           className="field mt-2 font-display text-lg"
           maxLength={24}
           autoComplete="off"
@@ -202,7 +210,7 @@ function PersonCard({
 
       {!hideFavs && (
         <>
-          <p className="mt-5 text-sm font-medium">{who === 'a' ? 'Things you love' : `Things ${draft.name.trim() || 'they'} love${draft.name.trim() ? 's' : ''}`}</p>
+          <p className="mt-5 text-sm font-medium">{mine ? 'Things you love' : `Things ${draft.name.trim() || 'they'} love${draft.name.trim() ? 's' : ''}`}</p>
           <p className="text-[13px] text-muted">Any artist, film or TV show. One is enough; three is better.</p>
           <div className="mt-2 space-y-4">
             {draft.favs.map((f, i) => (
@@ -421,6 +429,7 @@ export function Setup({
           draft={b}
           onChange={setB}
           autoFocus={!!invite}
+          self={!!invite}
           hideFavs={!invite && bMode === 'link'}
           top={
             invite ? undefined : (

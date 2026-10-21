@@ -12,7 +12,7 @@
 import type { AgentTraceStep, QlooEntity, QlooStatus } from '../types';
 import { qlooCompare, qlooKeyIsSet, qlooRelated, qlooScore, qlooSearch, savedFixtureCount } from '../qloo-client';
 import { extractJson, FunctionDeclaration, GeminiContent, GeminiPart, geminiGenerate, llmIsConfigured, modelOf } from '../llm';
-import { fold, namesMatch } from './match';
+import { bestMatch, fold, namesMatch } from './match';
 import type { Favourite, Person, PersonFit, PersonId, Pick, PickFit, PickKind, Plan, Session, SharedTag } from './types';
 
 type Source = 'live' | 'saved' | 'unavailable';
@@ -85,13 +85,13 @@ async function resolveFavourites(run: Run, session: Session) {
       const fav = jobs[i].fav;
       if (res.source === 'unavailable' || res.data.some((e) => namesMatch(e.name, fav.query))) return undefined;
       const tries = await Promise.all(KINDS.filter((k) => k !== fav.type).map((k) => qlooSearch(fav.query, k, 5)));
-      return tries.flatMap((t) => t.data).find((e) => namesMatch(e.name, fav.query));
+      return bestMatch(tries.flatMap((t) => t.data), fav.query);
     })
   );
   results.forEach((res, i) => {
     const fav = jobs[i].fav;
     run.note(res.source, res.capturedAt, res.error);
-    let match = res.data.find((e) => namesMatch(e.name, fav.query));
+    let match = bestMatch(res.data, fav.query);
     run.add('tool_call', 'qloo_search', `qloo_search(query="${fav.query}", type="${fav.type}")`);
     if (!match && other[i]) {
       match = other[i];

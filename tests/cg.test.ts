@@ -413,3 +413,10 @@ test('a music-only favourite still gets a film rank, scored from its Qloo tags, 
     NO_SCORE.clear();
   }
 });
+
+test('an exact name beats a longer one that contains it ("Tyla" is not "Tyla Yaweh")', async () => {
+  const { bestMatch } = await import('../lib/cg/match');
+  assert.equal(bestMatch([{ name: 'Tyla Yaweh' }, { name: 'Tyla' }], 'tyla')?.name, 'Tyla');
+  assert.equal(bestMatch([{ name: 'The Weeknd' }], 'weeknd')?.name, 'The Weeknd');
+  assert.equal(bestMatch([{ name: 'Adele' }], 'Drake'), undefined);
+});
