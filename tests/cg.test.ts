@@ -423,3 +423,12 @@ test('an exact name beats a longer one that contains it ("Tyla" is not "Tyla Yaw
   assert.equal(bestMatch([{ name: 'The Weeknd' }], 'weeknd')?.name, 'The Weeknd');
   assert.equal(bestMatch([{ name: 'Adele' }], 'Drake'), undefined);
 });
+
+test('a longer name never fits a shorter result: "Kelvin Momo" is not "Momo"', async () => {
+  const { nameFits, bestMatch } = await import('../lib/cg/match');
+  assert.equal(nameFits('Momo', 'Kelvin Momo'), false);
+  assert.equal(bestMatch([{ name: 'Momo' }, { name: 'Kelvin Jones' }], 'Kelvin Momo'), undefined);
+  assert.equal(nameFits('The Weeknd', 'weeknd'), true);
+  assert.equal(nameFits('Sarafina!', 'sarafina'), true);
+  assert.equal(nameFits('Momoland', 'momo'), false, 'only whole words count');
+});

@@ -304,7 +304,7 @@ let yearFilterRejected = false;
 export async function qlooRelated(
   entityId: string,
   targetType: string,
-  opts: { take?: number; maxYear?: number; explain?: boolean; tags?: string; locationQuery?: string } = {}
+  opts: { take?: number; maxYear?: number; explain?: boolean; tags?: string; locationQuery?: string; radiusMeters?: number } = {}
 ): Promise<QlooResult<QlooEntity[]> & { yearFilterApplied: boolean }> {
   const take = opts.take ?? 8;
   const base: Record<string, string> = {
@@ -316,6 +316,7 @@ export async function qlooRelated(
   if (opts.explain) base['feature.explainability'] = 'true';
   if (opts.tags && /^urn:tag:[a-z0-9_:]+$/.test(opts.tags)) base['filter.tags'] = opts.tags;
   if (opts.locationQuery) base['filter.location.query'] = opts.locationQuery.slice(0, 80);
+  if (opts.locationQuery && opts.radiusMeters) base['filter.location.radius'] = String(Math.min(50_000, Math.max(1000, Math.round(opts.radiusMeters))));
 
   const yearCapable = targetType === 'urn:entity:movie' || targetType === 'urn:entity:tv_show';
   if (yearCapable && opts.maxYear && !yearFilterRejected) {

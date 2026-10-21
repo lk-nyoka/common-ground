@@ -12,6 +12,7 @@ import { StoryViewer } from './Stories';
 import { Sparkles, Users } from 'lucide-react';
 import { roomItemsFrom } from '../../lib/cg/room-items';
 import { FeedbackPrompt } from './Feedback';
+import { Spots } from './Spots';
 
 function meta(p: Pick) {
   const bits: string[] = [typeLabel(p.type)];
@@ -486,6 +487,8 @@ export function PlanView({
           </div>
         </section>
       )}
+
+      {picks.length > 0 && <Spots session={session} />}
 
       {picks.length > 0 && (
         <section className="rounded-3xl border border-line bg-card">

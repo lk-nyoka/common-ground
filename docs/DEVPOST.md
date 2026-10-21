@@ -29,7 +29,7 @@ On 15 deliberately mismatched pairs (Metallica and Taylor Swift, Hugh Masekela a
 
 ## What we left out, on purpose
 
-Going out (our tests showed Qloo's places depend on location far more than taste), and a per-person "taste drops" model with notifications (built, but too little data to trust; it's on a branch).
+Going out as part of the plan (our tests showed Qloo's places depend on location far more than taste; testers asked for date spots, so they're an optional extra within 30 km, labelled honestly), and a per-person "taste drops" model with notifications (built, but too little data to trust; it's on a branch).
 
 ## What's next
 

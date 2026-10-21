@@ -70,6 +70,8 @@ When two people with different tastes choose together, one of three things usual
 - **Chat beside the plan.** When you're joined by a link, a small message thread (with quick replies like “🍿 Starting now?”) sits next to the plan.
 - **Shows its work live.** While planning, the screen shows the agent’s real steps as they happen. Every plan keeps a full trace.
 - **Learns from both of you.** After the night, tap who liked each thing: both of you, one of you, or neither. The next plan builds on your answers.
+- **The same questions for both of you.** Each person fills the same three slots, in the same order: a film, an artist and a series. Each slot searches only its own kind; if you put a series in the film slot, it says so and offers to move it.
+- **Going out instead?** Type an area or address and pick Food, Coffee, Drinks, Outdoors or Live music: Qloo returns places within 30 km ordered for both your tastes, and each is scored for each of you, with directions and the website.
 - **Your Mzansi match.** When Qloo finds a South African thread in the pair's shared taste, the plan adds South African artists ranked for both people. It queries Qloo's South African music tag with both tastes as joint signals, so the result depends on the pair (Tyla + Miriam Makeba fans get Brenda Fassie and Mafikizolo; Adele + Drake fans get Nasty C and Tyla). It is music only, because the same tag returned no films or shows. If Qloo finds nothing, the section doesn't appear. It can be switched off on the setup screen.
 - **Where to watch or listen.** Cards open the exact Netflix title or Spotify artist when Qloo links one, plus a JustWatch search for your country, a trailer search and IMDb. Ratings from IMDb, Rotten Tomatoes and Metacritic come from Qloo. Artists can be played in a Spotify player on the page. We don't check availability ourselves; the links take you to services that do.
 - **Swipe together, live.** For when you can't decide: a room with a link for each phone. Each person swipes on tonight's picks, and a pick both say yes to becomes a match on both screens at once. No second phone? Open the other side in a new tab. A swipe means "I'd consider it tonight"; the after-the-night rating is what the agent learns from.
@@ -227,7 +229,7 @@ Learning lasts for the browser tab. There's no account, so nothing is saved afte
 
 **Films change strongly with taste.** Results for the pair are genuinely different from either person's solo results.
 
-So this version is **at home only**: watch and listen. "Going out" is left out until we can show its places suit both people, not just that they're nearby. We built a live-venues section during development and removed it for this reason.
+So the plan itself is **for a night in**: watch and listen. Testers asked for date spots anyway, so "Going out instead?" is an optional extra under the plan: places within 30 km of an address, ordered by Qloo for both tastes, with each person's own rank. The app says plainly that for places, location matters more than taste.
 
 **What else we built and left out of this submission.** A per-person "taste drops" feature (a daily artist or film, chosen on the phone by a small Bayesian model with Thompson sampling, with push notifications) works, and is on the [`expansion-full`](https://github.com/lk-nyoka/common-ground/tree/expansion-full) branch. We left it out because with a handful of reactions per person its predictions would be too thin to trust, it learns one person rather than the pair, and its schedules would need durable storage. See [section 21](#21-roadmap).
 
@@ -330,7 +332,7 @@ Free Render services sleep after about 15 minutes without visits, and waking one
 
 | Command | What it does |
 | --- | --- |
-| `npm test` | 31 tests with Qloo and Gemini faked; no keys needed (planner, fairness, Mzansi lane, invite links, study, and live rooms) |
+| `npm test` | 32 tests with Qloo and Gemini faked; no keys needed (planner, fairness, Mzansi lane, invite links, study, and live rooms) |
 | `npm run typecheck` | TypeScript check of the app |
 | `npm run test:live` | Plans the two example pairs against the real APIs and prints the proof for every pick |
 | `npm run eval` | The Qloo vs AI-alone evaluation ([docs/EVALUATION.md](docs/EVALUATION.md)) |
@@ -360,6 +362,7 @@ The tests check that:
 | `GET /api/room/{id}/events?p=a\|b` | none | Server-sent events: the room each time it changes. |
 | `POST /api/feedback`, `GET /api/feedback?key=` | `{ ease, fit, liked, again, comment, context }` | Saves tester feedback; the summary needs `FEEDBACK_KEY`. |
 | `POST /api/pair`, `GET/POST /api/pair/{id}`, `GET /api/pair/{id}/events?p=a\|b` | `{ names }`; `{ who, type: "hello" \| "planning" \| "session" \| "message", … }` | Joins two phones after an invite: stage, shared plan (`?session=1`), chat, live events. |
+| `POST /api/cg/spots` | `{ a: [qlooId], b: [qlooId], where, kind: "food" \| "coffee" \| "drinks" \| "outdoors" \| "music" }` | Places within 30 km, with each person's rank. |
 | `GET /api/img?u=` | none | Qloo artwork served from our own site, so story cards can be drawn and saved. Only `images.qloo.com` is allowed. |
 | `GET /api/status` | none | `{ qloo: { keySet, savedResponses }, llm: { configured, model } }`. Never returns the keys. |
 | `GET /api/qloo/search`, `GET /api/qloo/insights` | query parameters | Raw Qloo helpers, used by the setup form and Gentle visit |
@@ -397,7 +400,8 @@ docs/EVALUATION.md          Evaluation method and results
 
 ## 20. Known limitations
 
-- **Scope:** two people, at home only. Groups and going out aren't built.
+- **Scope:** two people. Groups aren't built. Date spots are ordered by Qloo, but location dominates taste for places, and opening hours aren't checked.
+- **Qloo's catalogue has gaps,** especially for newer South African names (Kelvin Momo isn't in it yet). The app says so instead of matching a wrong, shorter name.
 - **Joined plans, chat and live rooms** live in one server's memory, so they reset when the app redeploys or restarts. That's fine for one free instance; several would need a shared store such as Redis.
 - **Start together** can't control playback on Netflix or Spotify. It counts you in together and keeps a shared clock and pause.
 - **Favourites:** artists, films and TV shows only. Qloo supports more domains; we kept to the ones that tested well.

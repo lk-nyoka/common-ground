@@ -4,14 +4,15 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, Copy, Film, Link2, Loader2, Music2, Plus, Share2, Tv, X } from 'lucide-react';
 import type { FavouriteType, Person, Session } from '../../lib/cg/types';
 import { fav, newSession, person, SAMPLE_PAIRS } from '../../lib/cg/samples';
-import { fold, namesMatch } from '../../lib/cg/match';
+import { fold, nameFits } from '../../lib/cg/match';
 import { type Invite, inviteUrl } from '../../lib/cg/invite';
 import { Art, Mark, minutesLabel } from './ui';
 
-const TYPES: { id: FavouriteType; label: string; Icon: typeof Film; example: [string, string] }[] = [
-  { id: 'urn:entity:artist', label: 'Music', Icon: Music2, example: ['An artist, e.g. Miriam Makeba', 'An artist, e.g. Tyla'] },
-  { id: 'urn:entity:movie', label: 'Film', Icon: Film, example: ['A film, e.g. Black Panther', 'A film, e.g. The Notebook'] },
-  { id: 'urn:entity:tv_show', label: 'Series', Icon: Tv, example: ['A series, e.g. Abbott Elementary', "A series, e.g. Grey's Anatomy"] }
+// The same three slots, in the same order, for both people: so their answers line up.
+const TYPES: { id: FavouriteType; label: string; ask: string; Icon: typeof Film; example: [string, string] }[] = [
+  { id: 'urn:entity:movie', label: 'Film', ask: 'A film', Icon: Film, example: ['e.g. Black Panther', 'e.g. Tsotsi'] },
+  { id: 'urn:entity:artist', label: 'Music', ask: 'An artist or band', Icon: Music2, example: ['e.g. Miriam Makeba', 'e.g. Tyla'] },
+  { id: 'urn:entity:tv_show', label: 'Series', ask: 'A series', Icon: Tv, example: ['e.g. Abbott Elementary', 'e.g. Blood & Water'] }
 ];
 const MINUTES = [45, 90, 120, 180];
 const COUNTRIES: { code: string; label: string }[] = [
@@ -31,6 +32,7 @@ type Check =
   | { state: 'checking' }
   | { state: 'found'; name: string; image?: string; type: FavouriteType; alts: { name: string; type: FavouriteType }[] }
   | { state: 'suggest'; options: { name: string; type: FavouriteType }[] }
+  | { state: 'elsewhere'; name: string; image?: string; type: FavouriteType }
   | { state: 'missing' }
   | { state: 'offline' };
 
@@ -45,14 +47,18 @@ interface Draft {
 }
 
 const blankFav = (type: FavouriteType = 'urn:entity:artist'): FavDraft => ({ query: '', type, check: { state: 'idle' } });
-const emptyDraft = (): Draft => ({ name: '', favs: [blankFav()] });
+const emptyDraft = (): Draft => ({ name: '', favs: TYPES.map((t) => blankFav(t.id)) });
+
+/** Put saved favourites back into their slots (one per kind). */
+const slotted = (favs: { query: string; type: FavouriteType }[]): FavDraft[] =>
+  TYPES.map((t) => {
+    const f = favs.find((x) => x.type === t.id);
+    return { query: f?.query || '', type: t.id, check: { state: 'idle' } as Check };
+  });
 
 const fromPerson = (p?: Person): Draft => {
   if (!p) return emptyDraft();
-  return {
-    name: ['You', 'Them'].includes(p.name) ? '' : p.name,
-    favs: p.favourites.length ? p.favourites.map((f) => ({ query: f.query, type: f.type, check: { state: 'idle' } as Check })) : [blankFav()]
-  };
+  return { name: ['You', 'Them'].includes(p.name) ? '' : p.name, favs: slotted(p.favourites) };
 };
 
 const typeLabel = (t: FavouriteType) => (t === 'urn:entity:artist' ? 'music' : t === 'urn:entity:movie' ? 'film' : 'series');
@@ -76,7 +82,7 @@ async function checkFavourite(query: string, preferred: FavouriteType, strict = 
     );
     if (answers.every((a) => a === null)) return { state: 'offline' };
     const all = answers.flatMap((a) => a || []);
-    const exact = all.filter((r) => namesMatch(r.name, query));
+    const exact = all.filter((r) => nameFits(r.name, query));
     if (exact.length) {
       // One best match per kind, then the most popular kind first (ties go to the kind they chose).
       // Exactly what they typed beats a longer name ("Tyla" over "Tyla Yaweh"); then popularity,
@@ -90,7 +96,15 @@ async function checkFavourite(query: string, preferred: FavouriteType, strict = 
       // Collaborations and spin-offs ("The Chainsmokers, Coldplay") go last, so they're harder to tap by mistake.
       const derived = (n: string) => /[,&+]|\bfeat\b|\bx\b/i.test(n) || fold(n) !== q;
       const alts = [...rest].sort((x, y) => Number(derived(x.name)) - Number(derived(y.name))).slice(0, 3);
-      return { state: 'found', name: best.name, image: best.image, type: best.type, alts: alts.map((e) => ({ name: e.name, type: e.type })) };
+      // In a slot, a match of another kind means they put it in the wrong row ("Blood & Water" is a series).
+      if (strict && best.type !== preferred) return { state: 'elsewhere', name: best.name, image: best.image, type: best.type };
+      return {
+        state: 'found',
+        name: best.name,
+        image: best.image,
+        type: best.type,
+        alts: alts.filter((e) => !strict || e.type === preferred).map((e) => ({ name: e.name, type: e.type }))
+      };
     }
     const seen = new Set<string>();
     const options = all
@@ -134,8 +148,8 @@ function CheckLine({ check, onUse }: { check: Check; onUse: (name: string, type:
     );
   if (check.state === 'suggest')
     return (
-      <div className="mt-1.5 text-[13px] text-ink">
-        <p>Qloo doesn’t know that exactly. Did you mean:</p>
+      <div className="mt-1.5 text-[13px] text-ink" role="status">
+        <p>Qloo doesn’t have that exact name (its data has gaps, especially for newer local names). Is it one of these? If not, try another favourite.</p>
         <div className="mt-1 flex flex-wrap gap-1.5">
           {check.options.map((o) => (
             <button
@@ -150,7 +164,23 @@ function CheckLine({ check, onUse }: { check: Check; onUse: (name: string, type:
         </div>
       </div>
     );
-  if (check.state === 'missing') return <p className="mt-1.5 text-[13px] text-danger">Qloo doesn’t know this one. Check the spelling or try the full name.</p>;
+  if (check.state === 'elsewhere')
+    return (
+      <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[13px] text-ink" role="status">
+        <span>
+          Qloo knows {check.name} as a <strong>{typeLabel(check.type)}</strong>.
+        </span>
+        <button type="button" className="min-h-[32px] rounded-full bg-shared px-3 font-medium text-white" onClick={() => onUse(check.name, check.type)}>
+          Move it to {typeLabel(check.type) === 'music' ? 'Music' : typeLabel(check.type) === 'film' ? 'Film' : 'Series'}
+        </button>
+      </div>
+    );
+  if (check.state === 'missing')
+    return (
+      <p className="mt-1.5 text-[13px] text-danger" role="status">
+        Qloo doesn’t have this one yet. Check the spelling, or pick another you love: Qloo’s data has gaps, especially for newer local names.
+      </p>
+    );
   return <p className="mt-1.5 text-[13px] text-muted">Couldn’t check right now. We’ll try again when you plan.</p>;
 }
 
@@ -189,10 +219,18 @@ function PersonCard({
     lastChecked.current[i] = `${q}|${f.type}`;
     if (q.length < 2) return setFav(i, { check: { state: 'idle' } });
     setFav(i, { check: { state: 'checking' } });
-    const result = await checkFavourite(q, f.type, force);
+    const result = await checkFavourite(q, f.type, true);
     // Ignore the answer if the person has typed something else since.
     if (latest.current.favs[i]?.query.trim() !== q) return;
-    setFav(i, result.state === 'found' ? { check: result, type: result.type } : { check: result });
+    setFav(i, { check: result });
+  };
+  /** Use a match: in this slot if it's this kind, otherwise moved to the slot for its kind. */
+  const useMatch = (i: number, name: string, type: FavouriteType) => {
+    const favs = latest.current.favs;
+    const j = favs.findIndex((x) => x.type === type);
+    const found: Check = { state: 'found', name, type, alts: [] };
+    if (j === i || j < 0) return setFav(i, { query: name, check: found });
+    onChange({ ...latest.current, favs: favs.map((x, k) => (k === j ? { ...x, query: name, check: found } : k === i ? { ...x, query: '', check: { state: 'idle' } } : x)) });
   };
 
   const tone = who === 'a' ? 'border-t-a' : 'border-t-b';
@@ -221,83 +259,50 @@ function PersonCard({
 
       {!hideFavs && (
         <>
-          <p className="mt-5 text-sm font-medium">{mine ? 'Things you love' : `Things ${draft.name.trim() || 'they'} love${draft.name.trim() ? 's' : ''}`}</p>
-          <p className="text-[13px] text-muted">Music, a film or a series. Just type the name: we work out which it is. One is enough; three is better.</p>
-          <div className="mt-2 space-y-4">
-            {draft.favs.map((f, i) => (
-              <div key={i}>
-                <div className="mb-1.5 flex gap-1" role="radiogroup" aria-label={`Kind of favourite ${i + 1}`}>
-                  {TYPES.map((t) => {
-                    const on = f.type === t.id && (f.check.state === 'found' || !f.query.trim() || f.check.state === 'idle' || f.check.state === 'checking');
-                    return (
-                      <button
-                        key={t.id}
-                        type="button"
-                        role="radio"
-                        aria-checked={f.type === t.id}
-                        onClick={() => {
-                          setFav(i, { type: t.id, check: { state: 'idle' } });
-                          // A tap means "this kind": check again, preferring it.
-                          if (f.query.trim()) setTimeout(() => runCheck(i, true), 0);
-                        }}
-                        className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium transition ${
-                          on ? 'border-ink bg-ink text-white' : 'border-line text-muted hover:border-ink/30 hover:text-ink'
-                        }`}
-                      >
-                        <t.Icon className="h-3.5 w-3.5" aria-hidden /> {t.label}
-                      </button>
-                    );
-                  })}
+          <p className="mt-5 text-sm font-medium">{mine ? 'What do you love?' : `What does ${draft.name.trim() || 'they'} love?`}</p>
+          <p className="text-[13px] text-muted">Fill in any you like. One is enough; all three is best.</p>
+          <div className="mt-3 space-y-3">
+            {draft.favs.map((f, i) => {
+              const t = TYPES.find((x) => x.id === f.type)!;
+              return (
+                <div key={t.id}>
+                  <label className="flex items-center gap-2">
+                    <span className="flex w-[4.5rem] shrink-0 items-center gap-1.5 text-[13px] font-medium text-ink">
+                      <t.Icon className="h-4 w-4 text-muted" aria-hidden /> {t.label}
+                    </span>
+                    <span className="sr-only">{t.ask}</span>
+                    <input
+                      value={f.query}
+                      onChange={(e) => {
+                        // Show "Checking Qloo…" straight away, so the field never looks dead.
+                        setFav(i, { query: e.target.value, check: e.target.value.trim().length >= 2 ? { state: 'checking' } : { state: 'idle' } });
+                        soon(i);
+                      }}
+                      onBlur={() => {
+                        clearTimeout(timers.current[i]);
+                        runCheck(i);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          (e.target as HTMLInputElement).blur();
+                        }
+                      }}
+                      placeholder={t.example[mine ? 0 : 1]}
+                      aria-label={`${mine ? 'Your' : 'Their'} favourite ${t.label.toLowerCase()}`}
+                      className="field min-w-0 flex-1"
+                      maxLength={60}
+                      autoComplete="off"
+                      enterKeyHint="next"
+                    />
+                  </label>
+                  <div className="pl-[5rem]">
+                    <CheckLine check={f.check} onUse={(name, type) => useMatch(i, name, type)} />
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    value={f.query}
-                    onChange={(e) => {
-                      // Show "Checking Qloo…" straight away, so the field never looks dead.
-                      setFav(i, { query: e.target.value, check: e.target.value.trim().length >= 2 ? { state: 'checking' } : { state: 'idle' } });
-                      soon(i);
-                    }}
-                    onBlur={() => {
-                      clearTimeout(timers.current[i]);
-                      runCheck(i);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        (e.target as HTMLInputElement).blur();
-                      }
-                    }}
-                    placeholder={TYPES.find((t) => t.id === f.type)!.example[mine ? 0 : 1].replace(/^An? (artist|film|series), /, '')}
-                    aria-label={`Favourite ${i + 1}`}
-                    className="field min-w-0 flex-1"
-                    maxLength={60}
-                    autoComplete="off"
-                    enterKeyHint="done"
-                  />
-                  {draft.favs.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => onChange({ ...draft, favs: draft.favs.filter((_, j) => j !== i) })}
-                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted hover:bg-paper hover:text-ink"
-                      aria-label={`Remove favourite ${i + 1}`}
-                    >
-                      <X className="h-4 w-4" aria-hidden />
-                    </button>
-                  )}
-                </div>
-                <CheckLine check={f.check} onUse={(name, type) => setFav(i, { query: name, type, check: { state: 'found', name, type, alts: [] } })} />
-              </div>
-            ))}
+              );
+            })}
           </div>
-          {draft.favs.length < MAX_FAVS && (
-            <button
-              type="button"
-              onClick={() => onChange({ ...draft, favs: [...draft.favs, blankFav(draft.favs.length === 1 ? 'urn:entity:movie' : 'urn:entity:tv_show')] })}
-              className="mt-3 inline-flex min-h-[44px] items-center gap-1.5 text-sm font-medium text-shared-ink"
-            >
-              <Plus className="h-4 w-4" aria-hidden /> Add another
-            </button>
-          )}
         </>
       )}
     </div>
@@ -413,9 +418,9 @@ export function Setup({
 }) {
   const keep = initial && !initial.isSample ? initial : null;
   const [a, setA] = useState<Draft>(() =>
-    invite ? { name: invite.from.name, favs: invite.from.favs.map((f) => ({ ...f, check: { state: 'idle' } as Check })) } : fromPerson(keep?.people[0])
+    invite ? { name: invite.from.name, favs: slotted(invite.from.favs) } : fromPerson(keep?.people[0])
   );
-  const [b, setB] = useState<Draft>(() => (invite ? { name: invite.toName, favs: [blankFav()] } : fromPerson(keep?.people[1])));
+  const [b, setB] = useState<Draft>(() => (invite ? { name: invite.toName, favs: emptyDraft().favs } : fromPerson(keep?.people[1])));
   const [minutes, setMinutes] = useState(invite?.minutes || keep?.minutes || 120);
   const [avoid, setAvoid] = useState(invite?.avoid.join(', ') || keep?.exclusions.join(', ') || '');
   const [country, setCountry] = useState(keep?.country || 'za');
@@ -425,7 +430,7 @@ export function Setup({
   // If the page receives an invite after first render (hash change), adopt it.
   useEffect(() => {
     if (!invite) return;
-    setA({ name: invite.from.name, favs: invite.from.favs.map((f) => ({ ...f, check: { state: 'idle' } as Check })) });
+    setA({ name: invite.from.name, favs: slotted(invite.from.favs) });
     setB((cur) => ({ ...cur, name: cur.name || invite.toName }));
     setMinutes(invite.minutes);
     setAvoid(invite.avoid.join(', '));
@@ -473,7 +478,7 @@ export function Setup({
               <span className="h-2.5 w-2.5 rounded-full bg-a" aria-hidden /> {invite.from.name} added
             </p>
             <ul className="mt-3 space-y-2">
-              {invite.from.favs.map((f, i) => (
+              {[...invite.from.favs].sort((x, y) => TYPES.findIndex((t) => t.id === x.type) - TYPES.findIndex((t) => t.id === y.type)).map((f, i) => (
                 <li key={i} className="flex items-baseline justify-between gap-3 border-b border-line pb-2 last:border-0">
                   <span className="font-medium">{f.query}</span>
                   <span className="text-[13px] text-muted">{TYPES.find((t) => t.id === f.type)?.label}</span>
