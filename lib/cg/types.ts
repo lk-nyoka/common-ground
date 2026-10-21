@@ -24,7 +24,7 @@ export interface Person {
   liked: { qlooEntityId: string; name: string }[];
 }
 
-export type PickKind = 'watch' | 'also' | 'listen' | 'swap' | 'local';
+export type PickKind = 'watch' | 'also' | 'listen' | 'swap' | 'local' | 'comedy';
 
 /** How one person's taste scores a pick: Qloo affinity, and its rank among tonight's candidates. */
 export interface PersonFit {
@@ -92,6 +92,8 @@ export interface Plan {
   swap: { forA?: Pick; forB?: Pick }; // forA: from B's world, picked for A
   /** South African artists for the pair's overlap (Qloo's South African music tag). */
   local: Pick[];
+  /** Stand-up comedians for both tastes (Qloo's stand-up comedy tag), with links to their shows. */
+  comedy?: Pick[];
   why: string[];
   tonight: string;
   trace: AgentTraceStep[];

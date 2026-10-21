@@ -16,6 +16,12 @@ export interface LinkOption {
 export function linksFor(p: Pick, country: string): LinkOption[] {
   const ext = p.external || {};
   const out: LinkOption[] = [];
+  if (p.kind === 'comedy') {
+    out.push({ label: 'Upcoming shows', url: `https://www.livenation.com/search?q=${enc(p.name)}`, primary: true });
+    out.push({ label: 'Watch a special', url: `https://www.youtube.com/results?search_query=${enc(`${p.name} stand up special`)}` });
+    if (ext.spotifyId) out.push({ label: 'Spotify', url: `https://open.spotify.com/artist/${ext.spotifyId}` });
+    return out;
+  }
   if (p.type.includes('artist')) {
     if (ext.spotifyId) out.push({ label: 'Open in Spotify', url: `https://open.spotify.com/artist/${ext.spotifyId}`, primary: true });
     else out.push({ label: 'Find on Spotify', url: `https://open.spotify.com/search/${enc(p.name)}`, primary: true });

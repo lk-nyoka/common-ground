@@ -403,6 +403,76 @@ function InvitePanel({ a, bName, minutes, avoid, onSent }: { a: Draft; bName: st
   );
 }
 
+/**
+ * The first five seconds: what it is, a picture of it, and two ways in. Apple-style: one idea per
+ * line, a visual instead of a paragraph, and the details only after.
+ */
+function Intro({ busy, onExample }: { busy: boolean; onExample: (i: number) => void }) {
+  const steps = [
+    { n: '1', t: 'Add what you love', d: 'A film, an artist and a series each. Or send the other person a link.' },
+    { n: '2', t: 'Qloo finds the overlap', d: 'Its taste data knows what fans of both of you go on to love.' },
+    { n: '3', t: 'Get one night, fair to both', d: 'Something to watch, music, a swap each way. Every pick shows how it suits each of you.' }
+  ];
+  const extras = ['Mzansi match', 'Comedy', 'Swipe together', 'Watch in step', 'Chat', 'Date spots', 'Story cards'];
+  return (
+    <section className="pt-4 sm:pt-10" aria-labelledby="intro-title">
+      <p className="text-sm font-semibold text-shared-ink">For two people with different taste</p>
+      <h1 id="intro-title" className="mt-2 max-w-2xl text-[2.4rem] font-semibold leading-[1.02] sm:text-6xl">
+        Two tastes. One night you’ll both enjoy.
+      </h1>
+      <p className="mt-4 max-w-xl text-[17px] leading-relaxed text-muted sm:text-lg">
+        Tell it what you each love. It plans a night in that suits you both, and shows you why.
+      </p>
+
+      <div className="mt-6 flex flex-col gap-2 sm:flex-row">
+        <a href="#start" className="btn-primary justify-center">
+          Plan our night
+        </a>
+        <button type="button" disabled={busy} onClick={() => onExample(0)} className="btn-quiet justify-center">
+          See an example first
+        </button>
+      </div>
+
+      {/* The idea as a picture: two tastes, and the part they share. */}
+      <div className="mt-8 overflow-hidden rounded-3xl border border-line bg-card p-5 sm:p-8" aria-hidden>
+        <div className="relative mx-auto flex items-center justify-center py-2">
+          <div className="flex h-40 w-40 shrink-0 items-center justify-start rounded-full bg-a/15 pl-5 ring-2 ring-a/40 sm:h-48 sm:w-48 sm:pl-7">
+            <span className="max-w-[5.5rem] text-[13px] font-semibold leading-snug text-a-ink">
+              Gogo
+              <span className="block font-normal text-ink/70">Miriam Makeba</span>
+            </span>
+          </div>
+          <div className="-ml-14 flex h-40 w-40 shrink-0 items-center justify-end rounded-full bg-b/15 pr-5 text-right ring-2 ring-b/40 sm:-ml-16 sm:h-48 sm:w-48 sm:pr-7">
+            <span className="max-w-[5.5rem] text-[13px] font-semibold leading-snug text-b-ink">
+              Lwazi
+              <span className="block font-normal text-ink/70">Tyla</span>
+            </span>
+          </div>
+          <div className="absolute bottom-0 left-1/2 z-10 -translate-x-1/2 translate-y-1/2 whitespace-nowrap rounded-2xl bg-shared px-4 py-2 text-center text-white shadow-lg">
+            <span className="block text-[11px] uppercase tracking-wider text-white/80">Tonight</span>
+            <span className="block font-display text-[15px] font-semibold">One night for both</span>
+          </div>
+        </div>
+        <div className="h-6" />
+      </div>
+
+      <ol className="mt-6 grid gap-3 sm:grid-cols-3" aria-label="How it works">
+        {steps.map((s) => (
+          <li key={s.n} className="rounded-2xl bg-card p-4">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-ink text-[13px] font-semibold text-white">{s.n}</span>
+            <p className="mt-2 font-semibold">{s.t}</p>
+            <p className="mt-0.5 text-sm text-muted">{s.d}</p>
+          </li>
+        ))}
+      </ol>
+
+      <p className="mt-4 text-[13px] text-muted">
+        <span className="font-medium text-ink">Also:</span> {extras.join(' · ')}. No sign-up.
+      </p>
+    </section>
+  );
+}
+
 export function Setup({
   onStart,
   busy,
@@ -444,31 +514,19 @@ export function Setup({
 
   return (
     <div className="space-y-7">
-      <section className="pt-4 sm:pt-8">
-        <h1 className="max-w-xl text-[2.1rem] font-semibold leading-[1.05] sm:text-6xl">
-          {invite ? `${invite.from.name} wants to plan a night with you.` : 'Two tastes. One night you’ll both enjoy.'}
-        </h1>
-        <p className="mt-4 max-w-lg text-[17px] leading-relaxed text-muted">
-          {invite
-            ? 'Add a few things you love. We’ll find where your tastes meet and plan something you’ll both enjoy.'
-            : 'Add a few favourites each. Qloo’s taste data finds where you overlap, the agent plans a night in, and every pick shows why it suits you both.'}
-        </p>
-      </section>
+      {invite ? (
+        <section className="pt-4 sm:pt-8">
+          <h1 className="max-w-xl text-[2.1rem] font-semibold leading-[1.05] sm:text-6xl">{`${invite.from.name} wants to plan a night with you.`}</h1>
+          <p className="mt-4 max-w-lg text-[17px] leading-relaxed text-muted">Add a film, an artist and a series you love. We’ll find what you’ll both enjoy, and it opens on both your phones.</p>
+        </section>
+      ) : (
+        <Intro busy={busy} onExample={(i) => onStart(SAMPLE_PAIRS[i].make())} />
+      )}
 
       {!invite && (
-        <section aria-labelledby="examples-title">
-          <h2 id="examples-title" className="text-sm font-medium text-muted">
-            Or start with an example
-          </h2>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {SAMPLE_PAIRS.map((p) => (
-              <button key={p.label} type="button" disabled={busy} onClick={() => onStart(p.make())} className="btn-quiet text-left">
-                <span className="font-semibold">{p.label}</span>
-                <span className="text-muted">{p.hint}</span>
-              </button>
-            ))}
-          </div>
-        </section>
+        <h2 id="start" className="scroll-mt-4 pt-2 font-display text-2xl font-semibold sm:text-3xl">
+          Plan your night
+        </h2>
       )}
 
       <div className="grid gap-4 md:grid-cols-2">

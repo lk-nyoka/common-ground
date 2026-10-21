@@ -15,7 +15,7 @@ import { FeedbackPrompt } from './Feedback';
 import { Spots } from './Spots';
 
 function meta(p: Pick) {
-  const bits: string[] = [typeLabel(p.type)];
+  const bits: string[] = [p.kind === 'comedy' ? 'Comedian' : typeLabel(p.type)];
   if (p.year) bits.push(String(p.year));
   else if (p.activeFrom) bits.push(`since ${p.activeFrom}`);
   if (p.durationMinutes && !p.type.includes('artist')) bits.push(p.type.includes('tv') ? `${p.durationMinutes} min episodes` : minutesLabel(p.durationMinutes));
@@ -84,7 +84,7 @@ function PickBlock({
         </div>
       </div>
       <p className="mt-3 text-[15px] leading-relaxed">{pick.reason}</p>
-      <FitProof pick={pick} names={names} compact />
+      <FitProof pick={pick} names={names} compact peek={hero} />
       {pick.type.includes('artist') && <SpotifyPlayer spotifyId={pick.external?.spotifyId} name={pick.name} />}
       <LinkRow links={linksFor(pick, country)} scroll={hero} />
       {pick.provenance === 'qloo_saved' && (
@@ -307,7 +307,7 @@ function CommonStrip({ session, plan }: { session: Session; plan: Plan }) {
   );
 }
 
-type Tab = 'also' | 'listen' | 'local' | 'swap';
+type Tab = 'also' | 'listen' | 'local' | 'swap' | 'comedy';
 
 export function PlanView({
   session,
@@ -354,6 +354,7 @@ export function PlanView({
       [
         { k: 'listen' as Tab, label: 'Music', n: plan.listen.length },
         { k: 'local' as Tab, label: 'Mzansi', n: plan.local?.length || 0 },
+        { k: 'comedy' as Tab, label: 'Comedy', n: plan.comedy?.length || 0 },
         { k: 'swap' as Tab, label: 'Swaps', n: [plan.swap.forA, plan.swap.forB].filter(Boolean).length },
         { k: 'also' as Tab, label: 'Films', n: plan.alsoWatch.length }
       ] as { k: Tab; label: string; n: number }[]
@@ -471,12 +472,14 @@ export function PlanView({
             ))}
           </div>
           <div role="tabpanel">
+            {current === 'comedy' && <p className="mb-3 text-[13px] text-muted">Stand-up comedians Qloo ranks for both of you. Catch a special tonight, or find their next live show.</p>}
             {current === 'local' && (
               <p className="mb-3 text-[13px] text-muted">South African artists Qloo found in your shared taste (music only: Qloo has no South African films or shows for this tag).</p>
             )}
             <ul className="divide-y divide-line">
               {current === 'listen' && plan.listen.map((p) => <PickRow key={p.id} pick={p} names={names} country={country} />)}
               {current === 'local' && plan.local.map((p) => <PickRow key={p.id} pick={p} names={names} country={country} />)}
+              {current === 'comedy' && (plan.comedy || []).map((p) => <PickRow key={p.id} pick={p} names={names} country={country} />)}
               {current === 'also' && plan.alsoWatch.map((p) => <PickRow key={p.id} pick={p} names={names} country={country} />)}
               {current === 'swap' &&
                 [

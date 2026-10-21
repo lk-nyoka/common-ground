@@ -72,6 +72,7 @@ When two people with different tastes choose together, one of three things usual
 - **Learns from both of you.** After the night, tap who liked each thing: both of you, one of you, or neither. The next plan builds on your answers.
 - **The same questions for both of you.** Each person fills the same three slots, in the same order: a film, an artist and a series. Each slot searches only its own kind; if you put a series in the film slot, it says so and offers to move it.
 - **Going out instead?** Type an area or address and pick Food, Coffee, Drinks, Outdoors or Live music: Qloo returns places within 30 km ordered for both your tastes, and each is scored for each of you, with directions and the website.
+- **Comedy.** A Comedy tab ranks stand-up comedians for both of you (Qloo files comedians as artists, under a stand-up comedy tag), with links to their upcoming shows and specials. Date spots include **Comedy & shows**: comedy clubs and theatres nearby.
 - **Your Mzansi match.** When Qloo finds a South African thread in the pair's shared taste, the plan adds South African artists ranked for both people. It queries Qloo's South African music tag with both tastes as joint signals, so the result depends on the pair (Tyla + Miriam Makeba fans get Brenda Fassie and Mafikizolo; Adele + Drake fans get Nasty C and Tyla). It is music only, because the same tag returned no films or shows. If Qloo finds nothing, the section doesn't appear. It can be switched off on the setup screen.
 - **Where to watch or listen.** Cards open the exact Netflix title or Spotify artist when Qloo links one, plus a JustWatch search for your country, a trailer search and IMDb. Ratings from IMDb, Rotten Tomatoes and Metacritic come from Qloo. Artists can be played in a Spotify player on the page. We don't check availability ourselves; the links take you to services that do.
 - **Swipe together, live.** For when you can't decide: a room with a link for each phone. Each person swipes on tonight's picks, and a pick both say yes to becomes a match on both screens at once. No second phone? Open the other side in a new tab. A swipe means "I'd consider it tonight"; the after-the-night rating is what the agent learns from.
@@ -332,7 +333,7 @@ Free Render services sleep after about 15 minutes without visits, and waking one
 
 | Command | What it does |
 | --- | --- |
-| `npm test` | 32 tests with Qloo and Gemini faked; no keys needed (planner, fairness, Mzansi lane, invite links, study, and live rooms) |
+| `npm test` | 33 tests with Qloo and Gemini faked; no keys needed (planner, fairness, Mzansi lane, invite links, study, and live rooms) |
 | `npm run typecheck` | TypeScript check of the app |
 | `npm run test:live` | Plans the two example pairs against the real APIs and prints the proof for every pick |
 | `npm run eval` | The Qloo vs AI-alone evaluation ([docs/EVALUATION.md](docs/EVALUATION.md)) |

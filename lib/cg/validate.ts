@@ -87,6 +87,7 @@ function cleanPlan(p: unknown, keepTrace: boolean): Plan | null {
     listen: arr(plan.listen).slice(0, 3).map(cleanPick).filter(Boolean) as Pick[],
     swap: { forA: cleanPick(plan.swap?.forA), forB: cleanPick(plan.swap?.forB) },
     local: arr(plan.local).slice(0, 3).map(cleanPick).filter(Boolean) as Pick[],
+    comedy: arr(plan.comedy).slice(0, 3).map(cleanPick).filter(Boolean) as Pick[],
     commonGround: arr(plan.commonGround).slice(0, 8),
     why: arr(plan.why).slice(0, 3).map((w) => cleanText(w, 300)),
     tonight: cleanText(plan.tonight, 500),

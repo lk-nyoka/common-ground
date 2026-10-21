@@ -432,3 +432,11 @@ test('a longer name never fits a shorter result: "Kelvin Momo" is not "Momo"', a
   assert.equal(nameFits('Sarafina!', 'sarafina'), true);
   assert.equal(nameFits('Momoland', 'momo'), false, 'only whole words count');
 });
+
+test('comedy lane: asks Qloo for stand-up comedians for both tastes', async () => {
+  const s = await planNight(sample());
+  assert.ok(calls.some((c) => c.url.includes('stand_up_comedy')), 'queried the stand-up comedy tag');
+  const plan = s.plans[0];
+  assert.ok(Array.isArray(plan.comedy));
+  for (const p of plan.comedy || []) assert.equal(p.kind, 'comedy');
+});

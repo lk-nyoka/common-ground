@@ -7,12 +7,14 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
 /** Kinds of date spot, mapped to Qloo place tags (each checked on the hackathon API, Oct 2026). */
-const KINDS: Record<string, string> = {
-  food: 'urn:tag:category:place:restaurant',
-  coffee: 'urn:tag:category:place:cafe',
-  drinks: 'urn:tag:category:place:bar',
-  outdoors: 'urn:tag:category:place:park',
-  music: 'urn:tag:category:place:live_music_venue'
+const KINDS: Record<string, string[]> = {
+  food: ['urn:tag:category:place:restaurant'],
+  coffee: ['urn:tag:category:place:cafe'],
+  drinks: ['urn:tag:category:place:bar'],
+  outdoors: ['urn:tag:category:place:park'],
+  music: ['urn:tag:category:place:live_music_venue'],
+  // Live shows: comedy clubs first, then theatres.
+  shows: ['urn:tag:genre:place:comedy_club', 'urn:tag:category:place:performing_arts_theater']
 };
 const RADIUS_M = 30_000;
 
@@ -35,9 +37,16 @@ export async function POST(request: NextRequest) {
       if (!a.length || !b.length) throw new InputError('Make a plan first, so we know both your tastes.');
       if (where.length < 3) throw new InputError('Type your area or address.');
       const joint = Array.from(new Set([...a, ...b]));
-      const found = await qlooRelated(joint.join(','), 'urn:entity:place', { take: 8, tags: KINDS[kind], locationQuery: where, radiusMeters: RADIUS_M });
-      if (found.source === 'unavailable') return NextResponse.json({ error: 'Qloo didn’t answer just now. Try again in a moment.' }, { status: 503 });
-      const list = found.data.filter((e) => e.place?.address || e.name);
+      const results = await Promise.all(
+        KINDS[kind].map((tag) => qlooRelated(joint.join(','), 'urn:entity:place', { take: KINDS[kind].length > 1 ? 5 : 8, tags: tag, locationQuery: where, radiusMeters: RADIUS_M }))
+      );
+      const found = results[0];
+      if (results.every((r) => r.source === 'unavailable')) return NextResponse.json({ error: 'Qloo didn’t answer just now. Try again in a moment.' }, { status: 503 });
+      const seen = new Set<string>();
+      const list = results
+        .flatMap((r) => r.data)
+        .filter((e) => (e.place?.address || e.name) && !seen.has(e.id) && !!seen.add(e.id))
+        .slice(0, 8);
       const placeIds = list.map((e) => e.id);
       const [sa, sb] = placeIds.length
         ? await Promise.all([qlooScore(a, 'urn:entity:place', placeIds), qlooScore(b, 'urn:entity:place', placeIds)])

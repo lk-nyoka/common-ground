@@ -218,7 +218,7 @@ export default function Home() {
             <span className={`inline-block h-2 w-2 rounded-full ${status!.qloo.keySet ? 'bg-emerald-600' : 'bg-amber-500'}`} aria-hidden />
             <span>
               {chip[0]}
-              <span className="hidden sm:inline">, {chip[1].toLowerCase()}</span>
+              <span className="hidden sm:inline">, {chip[1].replace('AI planner on', 'AI planner on').replace('Rules only', 'rules only')}</span>
             </span>
           </p>
         )}

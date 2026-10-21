@@ -138,12 +138,15 @@ interface Pools {
   aWorld: QlooEntity[]; // artists from A's side
   bWorld: QlooEntity[]; // artists from B's side
   local: QlooEntity[]; // South African artists for both tastes (Qloo's South Africa music tag)
+  comedy: QlooEntity[]; // stand-up comedians for both tastes
   sourceOf: Map<string, { source: Source; capturedAt?: string }>;
   fit: Map<string, PickFit>; // Qloo evidence per candidate id
 }
 
 /** Qloo tags verified on the hackathon API (Oct 2026). */
 export const SA_MUSIC_TAG = 'urn:tag:genre:music:south_africa';
+/** Stand-up comedians are artists in Qloo, under this tag (checked on the hackathon API, Oct 2026). */
+export const COMEDY_TAG = 'urn:tag:genre:music:stand_up_comedy';
 
 async function related(
   run: Run,
@@ -667,7 +670,7 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
   const aSig = signalsOf(A);
   const bSig = signalsOf(B);
   const tagSig = { a: tagSignalsOf(A), b: tagSignalsOf(B) };
-  const pools: Pools = { movies: [], tv: [], artists: [], aWorld: [], bWorld: [], local: [], sourceOf: new Map(), fit: new Map() };
+  const pools: Pools = { movies: [], tv: [], artists: [], aWorld: [], bWorld: [], local: [], comedy: [], sourceOf: new Map(), fit: new Map() };
   let tags: SharedTag[] = [];
 
   if (aSig.length && bSig.length) {
@@ -710,7 +713,12 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
           return scoreJobs(run, pools, [{ list, type: 'urn:entity:artist', who: ['a', 'b'] }], aSig, bSig, tagSig);
         })
       : Promise.resolve({ calls: 0, scored: 0 });
-    const [cmp, ...counts] = await Promise.all([qlooCompare(aSig, bSig, 12), films, shows, music, local]);
+    // Stand-up comedians for both tastes: for a comedy night, and to find their live shows.
+    const comedy = related(run, session, `${label}, stand-up comedians`, both, 'urn:entity:artist', 10, pools, { tags: COMEDY_TAG }).then((list) => {
+      pools.comedy = list;
+      return scoreJobs(run, pools, [{ list, type: 'urn:entity:artist', who: ['a', 'b'] }], aSig, bSig, tagSig);
+    });
+    const [cmp, ...counts] = await Promise.all([qlooCompare(aSig, bSig, 12), films, shows, music, local, comedy]);
     run.note(cmp.source, cmp.capturedAt, cmp.error);
     run.add('tool_call', 'qloo_compare', `qloo_compare(a=${A.name}'s favourites, b=${B.name}'s favourites)`);
     tags = verifyTags(session, cmp.data);
@@ -755,7 +763,7 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
   if (status === 'error') notices.unshift(`Qloo didn't answer (${(run.errors[0] || 'unknown error').slice(0, 140)}).`);
 
   const all = new Map<string, QlooEntity>();
-  for (const e of [...pools.movies, ...pools.tv, ...pools.artists, ...pools.aWorld, ...pools.bWorld, ...pools.local]) all.set(e.id, e);
+  for (const e of [...pools.movies, ...pools.tv, ...pools.artists, ...pools.aWorld, ...pools.bWorld, ...pools.local, ...pools.comedy]) all.set(e.id, e);
   const tagLine = tags.filter((t) => t.confirmed).slice(0, 2).map((t) => t.name).join(' and ');
   // For a shared pick that is in the bottom half for one person, the AI's note can't claim it
   // suits both, so the evidence-only reason is used instead and the trace says so.
@@ -789,6 +797,12 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
     .filter((e) => !used.has(e.id))
     .slice(0, 3)
     .map((e) => toPick(e, 'local', 'both', jointReason(pools.fit.get(e.id), session), pools));
+  const comedyUsed = new Set([...Array.from(used), ...localPicks.map((p) => p.qlooEntityId)]);
+  const comedyPicks = byFairness(pools.comedy, pools)
+    .filter((e) => !comedyUsed.has(e.id))
+    .slice(0, 3)
+    .map((e) => toPick(e, 'comedy', 'both', jointReason(pools.fit.get(e.id), session), pools));
+  if (comedyPicks.length) run.add('guardrail', 'Comedy picks', `${comedyPicks.length} stand-up comedians ranked fairly for both of you (Qloo's stand-up comedy tag): ${comedyPicks.map((p) => p.name).join(', ')}.`);
   if (session.includeLocal) {
     run.add(
       'guardrail',
@@ -816,7 +830,7 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
     ? `${session.minutes} minutes: watch ${watch.name}${listen[0] ? `, then put on ${listen[0].name}` : ''}${forA && forB ? `, and swap: ${A.name} tries ${forA.name}, ${B.name} tries ${forB.name}` : ''}.`
     : 'Not enough to plan tonight. Add another favourite each and try again.';
 
-  const picks = [watch, ...alsoWatch, ...listen, forA, forB, ...localPicks].filter(Boolean) as Pick[];
+  const picks = [watch, ...alsoWatch, ...listen, forA, forB, ...localPicks, ...comedyPicks].filter(Boolean) as Pick[];
   run.add('synthesis', planner === 'llm' ? `Plan chosen by ${choice.model || 'the AI planner'}` : 'Plan chosen by rules', picks.length ? picks.map((p) => `${p.name} (${p.kind})`).join(', ') : 'No picks.');
 
   const plan: Plan = {
@@ -830,6 +844,7 @@ export async function planNight(input: Session, opts: PlanOptions = {}): Promise
     listen,
     swap: { forA, forB },
     local: localPicks,
+    comedy: comedyPicks,
     why,
     tonight,
     trace: run.trace,

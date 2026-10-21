@@ -9,7 +9,7 @@ import type { Pick } from '../../lib/cg/types';
  * and how much each person's favourites drove it. Every number here comes from Qloo.
  */
 /** compact: a one-line summary with the full proof behind "Why this pick?" (used for every pick but the main one). */
-export function FitProof({ pick, names, compact = false }: { pick: Pick; names: [string, string]; compact?: boolean }) {
+export function FitProof({ pick, names, compact = false, peek = false }: { pick: Pick; names: [string, string]; compact?: boolean; peek?: boolean }) {
   const [open, setOpen] = useState(false);
   const [more, setMore] = useState(false);
   const id = useId();
@@ -38,7 +38,21 @@ export function FitProof({ pick, names, compact = false }: { pick: Pick; names: 
 
   if (compact && !more)
     return (
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
+      <div className="mt-2">
+      {peek && rows.length > 0 && (
+        // The main pick shows its proof at a glance: one bar per person, no numbers to decode.
+        <div className="mb-2 grid gap-1.5" aria-label={rows.map((r) => `${r.name}: ${r.f!.rank} of ${fit.of}`).join(', ')}>
+          {rows.map((r) => (
+            <div key={r.key} className="grid grid-cols-[minmax(0,5rem)_1fr] items-center gap-2 text-[13px]">
+              <span className={`truncate font-medium ${r.text}`}>{r.name}</span>
+              <span className="h-2 overflow-hidden rounded-full bg-line" aria-hidden>
+                <span className={`block h-full rounded-full ${r.bar}`} style={{ width: `${width(r.f!.rank)}%` }} />
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
         {verdict ? (
           <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${verdict.cls}`}>{topBoth ? 'Good for both of you' : `Leans towards ${lowFor === names[0] ? names[1] : names[0]}’s taste`}</span>
         ) : (
@@ -47,6 +61,7 @@ export function FitProof({ pick, names, compact = false }: { pick: Pick; names: 
         <button type="button" onClick={() => setMore(true)} aria-expanded={false} className="min-h-[32px] font-medium text-shared-ink underline underline-offset-2">
           Why this pick?
         </button>
+      </div>
       </div>
     );
 

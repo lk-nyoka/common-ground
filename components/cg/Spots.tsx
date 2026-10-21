@@ -10,7 +10,8 @@ const KINDS = [
   { k: 'coffee', label: 'Coffee', e: '☕' },
   { k: 'drinks', label: 'Drinks', e: '🍸' },
   { k: 'outdoors', label: 'Outdoors', e: '🌳' },
-  { k: 'music', label: 'Live music', e: '🎶' }
+  { k: 'music', label: 'Live music', e: '🎶' },
+  { k: 'shows', label: 'Comedy & shows', e: '🎤' }
 ] as const;
 const WHERE_KEY = 'cg-spots-where-v1';
 
