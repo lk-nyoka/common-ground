@@ -1,36 +1,38 @@
-# Common Ground: Devpost description (draft)
+# Common Ground: Devpost description
 
-## Inspiration
-
-Most "what should we watch?" fights aren't about the film. They're about one person's taste quietly winning every time. In South Africa that gap is often generational or cultural: a gogo who loves Miriam Makeba and a grandson who loves Tyla. We wanted an agent that finds the night both people would choose, and proves it isn't secretly favouring one of them.
+**Two tastes. One night you'll both enjoy.**
 
 ## What it does
 
-Each person adds a few artists, films or shows. Common Ground then:
+Common Ground is an agent for two people with different taste, like a couple, two friends, or a gogo and her grandson. Each person names a film, an artist and a series they love. The agent then:
 
-- **finds the overlap** with Qloo (shared taste tags, checked against both people's own favourites);
-- **plans one night**: a film or show that fits the time you have, music to put on, and a swap each way from the other person's world;
-- **proves every pick**: its rank for each person on their own, each person's share of Qloo's signal behind it, and a plain verdict, either "Top half for both of you" or "Fairest of tonight's options, but lower for Gogo";
-- **adds a Mzansi match**: when the pair's shared taste has a South African music thread in Qloo, South African artists ranked for both;
-- **makes it social**: an invite link for the second person, a live swipe room where a match lands on both phones at once, a start-together countdown, and story cards to share;
-- **learns**: after the night, you tap who liked what, and the next plan builds on it.
+- **finds the overlap** with Qloo: the taste tags you share, checked against both people's own favourites;
+- **plans one night**: something to watch that fits the time you have, music to put on, and a swap each way from the other person's world;
+- **proves each pick is fair**: every pick shows where it ranks for each person on their own. A pick that only suits one person is swapped out, or labelled "Leans towards Gogo's taste";
+- **adds local flavour and comedy**: South African artists when Qloo finds a South African thread in your shared taste, and stand-up comedians ranked for both of you, with links to their upcoming shows;
+- **works apart**: send the other person a link. They add their own favourites on their phone, the plan opens on both phones, and there's a chat beside it;
+- **helps you decide**: swipe on tonight's picks together, match when you both say yes, then start at the same moment;
+- **goes out if you want**: date spots within 30 km of an address (food, coffee, drinks, outdoors, live music, comedy and theatre), ordered for both tastes;
+- **learns**: after the night you tap who liked what, and the next plan builds on it.
 
-## How we built it
+No sign-up. It works on any phone.
 
-Next.js on Render; Qloo's search, insights (joint signals, per-person scoring with `filter.results.entities`, explainability, tag filters) and compare; Gemini as the planner with function calling, behind guardrails. The agent can only pick Qloo entities. A critic replaces any pick in the bottom half for one person when a pick in the top half for both exists. AI notes that overclaim are replaced with Qloo's ranks. Every step is in a visible trace.
+## What makes it Qloo-powered
 
-## Without Qloo it doesn't work
+Without Qloo it doesn't work. Fair ranking needs a score for every candidate for each person separately (`filter.results.entities`). Finding what fans of both tastes go on to love needs the taste graph (joint signals in insights). The split between the two people comes from Qloo's explainability. Qloo also provides the shared tags (compare), the South African and stand-up comedy lanes (tag filters), runtimes and ratings, and nearby places (location and radius filters). When Qloo has no direct score across kinds, for example films for someone who only added music, the agent scores that person from their favourites' Qloo tags and says so.
 
-Fair ranking needs a per-person score for every candidate, finding what fans of both tastes like needs the taste graph, and the Mzansi match depends on Qloo connecting two specific tastes to a local tag. An LLM alone can name films; it can't show you where each pick ranks for each person.
+Gemini plans the night with function calling, but it can only choose among Qloo results. A critic replaces any pick that's in the bottom half for one person when a better option exists for both, and AI notes that overclaim are replaced with Qloo's ranks. Every step is in a visible trace.
 
 ## Evidence
 
-On 15 deliberately mismatched pairs (Metallica and Taylor Swift, Hugh Masekela and Billie Eilish, Black Coffee and Dolly Parton) we compared Common Ground with the same model alone. For the person each pick suited least, Common Ground's picks had higher Qloo affinity in all 15 pairs (0.843 vs 0.771), the gap between the two people was smaller (0.056 vs 0.090), and every film's runtime was checked against the time available (35 of 35, vs none checkable for the AI alone). We also report where it lost: the AI alone named more films outside both people's top 30 (92% vs 77%). The affinity measures are Qloo's own, so a blind study at `/study` measures whether people actually enjoy the picks.
+On 15 deliberately mismatched pairs, we compared Common Ground with the same AI model working alone:
 
-## What we left out, on purpose
+- **Fairer to the person each pick suits least:** that person's Qloo affinity was higher in all 15 pairs (0.843 vs 0.771).
+- **Smaller gap between the two people:** 0.056 vs 0.090.
+- **Runtimes checked:** every film's runtime was checked against the time available (35 of 35, against none for the AI alone).
 
-Going out as part of the plan (our tests showed Qloo's places depend on location far more than taste; testers asked for date spots, so they're an optional extra within 30 km, labelled honestly), and a per-person "taste drops" model with notifications (built, but too little data to trust; it's on a branch).
+Where it lost: the AI alone named more films outside both people's top 30 (92% vs 77%). The affinity numbers are Qloo's own, so a built-in blind study (`/study`) measures whether people actually enjoy the picks.
 
-## What's next
+## Built with
 
-Persistent pair spaces that remember you across nights, verified streaming availability, and taste drops for the pair.
+Next.js, TypeScript and Tailwind on Render (free tier), the Qloo hackathon API and Google Gemini. It's MIT-licensed, with 33 automated tests.
