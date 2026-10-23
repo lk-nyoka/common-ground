@@ -259,7 +259,7 @@ function PersonCard({
 
       {!hideFavs && (
         <>
-          <p className="mt-5 text-sm font-medium">{mine ? 'What do you love?' : `What does ${draft.name.trim() || 'they'} love?`}</p>
+          <p className="mt-5 text-sm font-medium">{mine ? 'What do you love?' : draft.name.trim() ? `What does ${draft.name.trim()} love?` : 'What do they love?'}</p>
           <p className="text-[13px] text-muted">Fill in any you like. One is enough; all three is best.</p>
           <div className="mt-3 space-y-3">
             {draft.favs.map((f, i) => {
