@@ -7,7 +7,7 @@ Everything entered on the Devpost form, kept here so it lives with the code.
 - **Began:** 11 October 2026 (built from scratch for this hackathon)
 - **Built with:** next.js, typescript, react, tailwindcss, node.js, qloo, gemini, google-gemini-api, render, server-sent-events, playwright
 - **Gallery:** [`docs/media/gallery`](media/gallery) (3:2, upload in number order; `01-cover.jpg` is the thumbnail)
-- **Demo video:** [`docs/media/common-ground-demo.mp4`](media/common-ground-demo.mp4)
+- **Demo video:** https://youtu.be/g-IFSb9iVOw (file: [`docs/media/common-ground-demo.mp4`](media/common-ground-demo.mp4))
 
 ---
 
