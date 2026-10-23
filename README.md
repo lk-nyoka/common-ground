@@ -2,6 +2,10 @@
 
 > **Two tastes. One night you’ll both enjoy.**
 
+![Common Ground: two tastes, one night you'll both enjoy](docs/media/gallery/01-cover.jpg)
+
+**Demo video (2:54):** [docs/media/common-ground-demo.mp4](docs/media/common-ground-demo.mp4) · **Screenshots:** [docs/media/gallery](docs/media/gallery)
+
 Common Ground is a planning agent for two people: a couple, two friends, or a parent and their adult child. Each person adds a few artists, films or shows they love. The agent uses [Qloo](https://www.qloo.com/)’s taste graph to find where the two tastes meet, and plans a night in around that overlap: something to watch, music to put on, and one “swap” each way from the other person’s world. **Every pick shows proof that it suits both of you:** its rank for each person’s taste on its own, and how much each person’s favourites pulled it. Afterwards you say who liked what, and the next plan learns from it.
 
 - **Live app:** <https://common-ground-pho7.onrender.com>

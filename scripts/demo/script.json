@@ -1,0 +1,157 @@
+[
+ {
+  "id": "hook",
+  "kind": "hook",
+  "title": [
+   "Gogo loves Miriam Makeba.",
+   "Lwazi loves Tyla."
+  ],
+  "vo": "My gogo loves Miriam Makeba. I love Tyla. Finding something we both enjoy? Not easy.",
+  "dur": 9.6
+ },
+ {
+  "id": "title",
+  "kind": "title",
+  "title": [
+   "Common Ground"
+  ],
+  "sub": "Two tastes. One night you'll both enjoy.",
+  "vo": "So I built Common Ground.",
+  "dur": 3.2
+ },
+ {
+  "id": "landing",
+  "kind": "phone",
+  "clip": "landing",
+  "speed": 1.0,
+  "title": [
+   "Here’s how",
+   "it works."
+  ],
+  "sub": "One idea, three steps. No sign-up.",
+  "vo": ""
+ },
+ {
+  "id": "setup",
+  "kind": "phone",
+  "clip": "setup",
+  "speed": 1.15,
+  "title": [
+   "Add what you",
+   "each love."
+  ],
+  "sub": "A film, an artist and a series. Checked with Qloo as you type.",
+  "vo": "We each add a film, an artist and a series, and it checks every one with Qloo as we type."
+ },
+ {
+  "id": "plan",
+  "kind": "phone",
+  "clip": "plan",
+  "speed": 1.7,
+  "title": [
+   "Qloo finds where",
+   "your tastes meet."
+  ],
+  "sub": "An AI agent plans one night from Qloo's taste data.",
+  "vo": "Then an AI agent uses Qloo's taste data to find where our tastes meet, and plans one night."
+ },
+ {
+  "id": "proof",
+  "kind": "phone",
+  "clip": "proof",
+  "speed": 1.0,
+  "title": [
+   "Fair to both.",
+   "And it shows why."
+  ],
+  "sub": "Every pick ranks for each of you. One-sided picks get swapped.",
+  "vo": "Every pick shows how it ranks for each of us. If it only suits one person, the agent swaps it out."
+ },
+ {
+  "id": "tabs",
+  "kind": "phone",
+  "clip": "tabs",
+  "speed": 1.0,
+  "title": [
+   "Mzansi flavour.",
+   "Comedy too."
+  ],
+  "sub": "South African artists, and comedians you can catch live.",
+  "vo": "It even finds South African artists, and comedians we'd both laugh at."
+ },
+ {
+  "id": "apart",
+  "kind": "two",
+  "clips": [
+   "apartA",
+   "apartB"
+  ],
+  "speed": 1.9,
+  "title": [
+   "Apart? Plan it together."
+  ],
+  "sub": "Send a link. The plan opens on both phones, with a chat beside it.",
+  "vo": "Not in the same room? Send a link. The plan opens on both phones, with a chat right beside it."
+ },
+ {
+  "id": "swipe",
+  "kind": "two",
+  "clips": [
+   "swipeA",
+   "swipeB"
+  ],
+  "speed": 1.3,
+  "title": [
+   "Swipe. Match. Press play."
+  ],
+  "sub": "When you both say yes, it's a match. Then start at the same moment.",
+  "vo": "Can't decide? Swipe together. When you both say yes, it's a match, and you press play at the same moment."
+ },
+ {
+  "id": "spots",
+  "kind": "phone",
+  "clip": "spots",
+  "speed": 1.25,
+  "title": [
+   "Going out",
+   "instead?"
+  ],
+  "sub": "Date spots within 30 km, for both your tastes.",
+  "vo": "Going out instead? It finds date spots near you."
+ },
+ {
+  "id": "story",
+  "kind": "phone",
+  "clip": "story",
+  "speed": 1.0,
+  "title": [
+   "Share",
+   "your night."
+  ],
+  "sub": "Story cards, ready for WhatsApp or Instagram.",
+  "vo": "Share your night as story cards."
+ },
+ {
+  "id": "rate",
+  "kind": "phone",
+  "clip": "rate",
+  "speed": 1.0,
+  "title": [
+   "It learns from",
+   "both of you."
+  ],
+  "sub": "Say who liked what. The next night gets better.",
+  "vo": "Tell it who liked what, and the next night gets better."
+ },
+ {
+  "id": "end",
+  "kind": "end",
+  "title": [
+   "Common Ground"
+  ],
+  "sub": "Two tastes. One night you'll both enjoy.",
+  "url": "common-ground-pho7.onrender.com",
+  "vo": "Common Ground. Two tastes, one night you'll both enjoy.",
+  "dur": 6.0
+ }
+]
